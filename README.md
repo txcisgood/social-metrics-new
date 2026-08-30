@@ -47,6 +47,14 @@ python3 run.py --api-key AIzaSy... --input accounts.xlsx
 pip3 install -r requirements.txt   # 只需要 requests 和 openpyxl
 ```
 
+或者跑一键脚本（macOS / Linux，会自动检测系统、装 Python 3.9+、建 venv、装依赖、初始化 `config.json`）：
+
+```bash
+./install.sh
+```
+
+Windows 用户用 `python.org` 装 Python 后跑 `python -m venv .venv && pip install -r requirements.txt` 即可。
+
 ## 使用
 
 **先记住两件事**：这批合作伙伴都在英国，所以时区要用 `Europe/London`；日常应该抓**昨天**而不是今天。
