@@ -53,7 +53,13 @@ pip3 install -r requirements.txt   # 只需要 requests 和 openpyxl
 ./install.sh
 ```
 
-Windows 用户用 `python.org` 装 Python 后跑 `python -m venv .venv && pip install -r requirements.txt` 即可。
+Windows 用户跑 `install.ps1`（会自动用 winget 装 Python 3.12 + 建 venv + 装依赖 + 初始化 `config.json`）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+要求 Win10 1809+ / Win11（自带 winget）。没有 winget 的老 Windows 才需要手动装 Python。
 
 ## 使用
 
