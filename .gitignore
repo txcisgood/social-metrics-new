@@ -1,0 +1,9 @@
+.venv/
+config.json
+results/
+.cache/
+__pycache__/
+*.pyc
+.idea/
+.DS_Store
+.workbuddy/
