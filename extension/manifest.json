@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Social Metrics · 社媒采集",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "在已登录的 Instagram 标签页读取账号动态，支持 YouTube Data API，导入账号表并导出 Excel。",
   "minimum_chrome_version": "120",
   "permissions": ["scripting", "storage"],

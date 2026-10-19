@@ -1,3 +1,5 @@
+// Native selects retain the form model behind the enhanced combobox.
+// This suite sets that model; extension-ui-browser.cjs tests actual dropdown interaction.
 /* Offline persistence integration: a disposable browser profile, no collection
  * or external requests. Uses the same browser overrides as the full smoke test. */
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -75,23 +77,23 @@ const STORE = 'metrics.preferences.v1';
   try {
     let url = await launch();
     let page = await open(url);
-    await page.locator('#platformSelect').selectOption('all');
+    await page.locator('#platformSelect').selectOption('all', {force: true});
     await showKey(page);
     assert.equal(await page.locator('#rememberYoutubeKey').isChecked(), true);
     await page.locator('#youtubeKey').fill(KEY);
-    await page.locator('#dateMode').selectOption('quarter');
+    await page.locator('#dateMode').selectOption('quarter', {force: true});
     await page.locator('#quarterYear').fill('2024');
-    await page.locator('#quarter').selectOption('1');
-    await page.locator('#timeZone').selectOption('UTC');
+    await page.locator('#quarter').selectOption('1', {force: true});
+    await page.locator('#timeZone').selectOption('UTC', {force: true});
     await page.getByText('高级设置', {exact: true}).click();
     await page.locator('#maxPages').fill('9');
     await page.locator('#maxPosts').fill('55');
-    await page.locator('#scanMode').selectOption('complete');
+    await page.locator('#scanMode').selectOption('complete', {force: true});
     await page.locator('#minDelay').fill('4');
     await page.locator('#maxDelay').fill('6');
-    await page.locator('#platformSelect').selectOption('youtube');
-    await page.locator('#themeMode').selectOption('system');
-    await page.locator('#interfaceStyle').selectOption('classic');
+    await page.locator('#platformSelect').selectOption('youtube', {force: true});
+    await page.locator('#themeMode').selectOption('system', {force: true});
+    await page.locator('#interfaceStyle').selectOption('classic', {force: true});
     const expected = {platformSelect: 'youtube', dateMode: 'quarter', quarterYear: 2024, quarter: 1, timeZone: 'UTC',
       maxPages: 9, maxPosts: 55, scanMode: 'complete', minDelay: 4, maxDelay: 6, themeMode: 'system', interfaceStyle: 'classic'};
     await waitSettings(page, expected);
@@ -143,12 +145,12 @@ const STORE = 'metrics.preferences.v1';
     await waitKey(page, undefined);
     assert.equal(await page.locator('#youtubeKey').inputValue(), '');
     assert.equal(await page.locator('#rememberYoutubeKey').isChecked(), false);
-    await second.locator('#themeMode').selectOption('dark');
-    await second.locator('#interfaceStyle').selectOption('tech');
+    await second.locator('#themeMode').selectOption('dark', {force: true});
+    await second.locator('#interfaceStyle').selectOption('tech', {force: true});
     await waitSettings(second, {themeMode: 'dark', interfaceStyle: 'tech'});
     assert.equal((await stored(second)).youtubeKey, undefined, 'An appearance edit in a stale worktab must not restore a cleared key');
     assert.equal(await second.locator('#youtubeKey').inputValue(), KEY, 'Appearance edits must not modify the existing input');
-    await second.locator('#quarter').selectOption('2');
+    await second.locator('#quarter').selectOption('2', {force: true});
     await waitSettings(second, {quarter: 2});
     assert.equal((await stored(second)).youtubeKey, undefined);
     await second.close();

@@ -98,8 +98,8 @@ const reviewRows = [
   }
 
   async function appearance(themeMode, style, effectiveTheme) {
-    await page.locator('#themeMode').selectOption(themeMode);
-    await page.locator('#interfaceStyle').selectOption(style);
+    await page.locator('#themeMode').selectOption(themeMode, {force: true});
+    await page.locator('#interfaceStyle').selectOption(style, {force: true});
     await page.waitForFunction(expected => {
       const {dataset} = document.documentElement;
       return dataset.theme === expected.theme && dataset.themeMode === expected.mode && dataset.style === expected.style;
@@ -140,6 +140,147 @@ const reviewRows = [
     assert.ok(bounds.y >= -1 && bounds.y + bounds.height <= viewport.height + 1,
       `${label}: help must fit vertically in ${viewport.height}px`);
     await noHorizontalOverflow(label);
+  }
+
+  async function selectControls(id) {
+    const native = page.locator(`#${id}`), control = page.locator(`.select-control[data-select-id="${id}"]`);
+    const trigger = control.locator('.select-trigger');
+    assert.equal(await trigger.getAttribute('role'), 'combobox');
+    const listbox = page.locator(`#${await trigger.getAttribute('aria-controls')}`);
+    assert.equal(await listbox.getAttribute('role'), 'listbox');
+    const popover = page.locator('.select-popover').filter({has: listbox});
+    assert.equal(await popover.count(), 1);
+    return {native, trigger, listbox, popover};
+  }
+
+  async function chooseFromMenu(id, value) {
+    const select = await selectControls(id);
+    await select.trigger.click();
+    await select.popover.waitFor({state: 'visible'});
+    await select.listbox.locator(`[role="option"][data-value="${value}"]`).click();
+    await select.popover.waitFor({state: 'hidden'});
+    assert.equal(await select.native.inputValue(), value);
+    assert.equal(await select.trigger.getAttribute('aria-expanded'), 'false');
+    return select;
+  }
+
+  async function screenshotSelect(id, name) {
+    const {trigger, popover} = await selectControls(id);
+    await trigger.click();
+    await popover.waitFor({state: 'visible'});
+    await assertHelpWithinViewport(popover, name);
+    if (id === 'themeMode') assert.ok((await popover.boundingBox()).width >= 199,
+      'Compact header controls need a readable menu at least 200px wide');
+    await painted();
+    await page.screenshot({path: path.join(previewDirectory, `${browserLabel}-${name}.png`),
+      fullPage: false, animations: 'disabled'});
+    await page.keyboard.press('Escape');
+    await popover.waitFor({state: 'hidden'});
+  }
+
+  async function verifySelectUI() {
+    assert.equal(await page.locator('.select-control').count(), await page.locator('select').count(),
+      'Every native select must have one consistent visual control');
+    const theme = await selectControls('themeMode');
+    assert.equal(await theme.native.getAttribute('aria-hidden'), 'true');
+    assert.equal(await theme.native.getAttribute('tabindex'), '-1');
+    assert.equal(await theme.trigger.getAttribute('title'), await theme.native.evaluate(element => element.selectedOptions[0].label));
+    assert.equal(await page.getByRole('combobox', {name: '颜色模式', exact: true}).count(), 1,
+      'The visible select needs its label without a duplicate native combobox');
+    await page.locator('label').filter({hasText: /^颜色模式$/}).click();
+    assert.equal(await theme.trigger.evaluate(element => element === document.activeElement), true);
+    assert.equal(await theme.popover.isVisible(), false, 'Clicking a label focuses the control without opening it');
+
+    await page.evaluate(() => {
+      window.__selectTestChanges = {input: 0, change: 0};
+      for (const event of ['input', 'change']) document.getElementById('themeMode')
+        .addEventListener(event, () => window.__selectTestChanges[event]++);
+    });
+    await chooseFromMenu('themeMode', 'light');
+    assert.deepEqual(await page.evaluate(() => window.__selectTestChanges), {input: 1, change: 1},
+      'One pointer choice must dispatch exactly one input/change pair');
+    assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
+
+    // Keyboard selection uses a highlighted option while focus stays on the
+    // combobox. Navigation alone must not overwrite the saved selection.
+    await theme.trigger.focus();
+    await page.keyboard.press('Space');
+    await theme.popover.waitFor({state: 'visible'});
+    await page.keyboard.press('Home');
+    await page.keyboard.press('ArrowDown');
+    const active = await theme.trigger.getAttribute('aria-activedescendant');
+    assert.equal(await page.locator(`#${active}`).getAttribute('data-value'), 'light');
+    assert.equal(await theme.trigger.evaluate(element => element === document.activeElement), true);
+    await page.keyboard.press('Enter');
+    await theme.popover.waitFor({state: 'hidden'});
+    assert.equal(await theme.native.inputValue(), 'light');
+
+    await page.keyboard.press('Enter');
+    await theme.popover.waitFor({state: 'visible'});
+    await page.keyboard.press('End');
+    assert.equal(await theme.native.inputValue(), 'light');
+    await page.keyboard.press('Space');
+    await theme.popover.waitFor({state: 'hidden'});
+    assert.equal(await theme.native.inputValue(), 'system');
+
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('Enter');
+    assert.equal(await theme.native.inputValue(), 'light');
+    await theme.trigger.click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Escape');
+    await theme.popover.waitFor({state: 'hidden'});
+    assert.equal(await theme.native.inputValue(), 'light', 'Escape must cancel the pending choice');
+    assert.equal(await theme.trigger.evaluate(element => element === document.activeElement), true);
+    await theme.trigger.click();
+    await page.keyboard.press('Home');
+    await page.keyboard.press('Tab');
+    await theme.popover.waitFor({state: 'hidden'});
+    assert.equal(await theme.trigger.evaluate(element => element === document.activeElement), false,
+      'Tab must move to the next control without trapping keyboard users');
+    assert.equal(await theme.native.inputValue(), 'light');
+    await theme.trigger.click();
+    await page.keyboard.press('End');
+    await page.locator('h1').click();
+    await theme.popover.waitFor({state: 'hidden'});
+    assert.equal(await theme.native.inputValue(), 'light');
+
+    const platform = await selectControls('platformSelect');
+    await platform.trigger.click();
+    await page.keyboard.press('y');
+    await page.keyboard.press('Enter');
+    assert.equal(await platform.native.inputValue(), 'youtube', 'Typeahead must select a matching platform');
+    await chooseFromMenu('platformSelect', 'instagram');
+
+    // Native changes still drive the collection code. The enhanced control
+    // must mirror programmatic disable/enable and asynchronously loaded tabs.
+    await theme.native.evaluate(element => { element.disabled = true; });
+    await page.waitForFunction(() => document.querySelector('.select-control[data-select-id="themeMode"] .select-trigger').disabled);
+    await theme.trigger.click({force: true});
+    assert.equal(await theme.popover.isVisible(), false);
+    await theme.native.evaluate(element => { element.disabled = false; });
+    await page.waitForFunction(() => !document.querySelector('.select-control[data-select-id="themeMode"] .select-trigger').disabled);
+
+    const tabs = await selectControls('tabSelect');
+    const originalTabs = await tabs.native.evaluate(element => ({html: element.innerHTML, value: element.value}));
+    await tabs.native.evaluate(element => {
+      element.replaceChildren(new Option('请选择 Instagram 标签页', ''),
+        new Option('示例 Instagram 标签页 A', 'offline-tab-a'));
+    });
+    await tabs.trigger.click();
+    await tabs.popover.waitFor({state: 'visible'});
+    await tabs.native.evaluate(element => element.append(new Option('示例 Instagram 标签页 B · 新加载的页面', 'offline-tab-b')));
+    await tabs.listbox.locator('[role="option"][data-value="offline-tab-b"]').waitFor({state: 'visible'});
+    await tabs.listbox.locator('[role="option"][data-value="offline-tab-b"]').click();
+    assert.equal(await tabs.native.inputValue(), 'offline-tab-b');
+    assert.match(await tabs.trigger.textContent(), /标签页 B/);
+    await tabs.native.evaluate((element, original) => {
+      element.innerHTML = original.html;
+      element.value = original.value;
+      element.dispatchEvent(new Event('change', {bubbles: true}));
+    }, originalTabs);
+    await chooseFromMenu('themeMode', 'dark');
   }
 
   async function verifyHelp(index, label) {
@@ -281,12 +422,14 @@ const reviewRows = [
     await page.locator('.settings-scroll').evaluate(element => { element.scrollTop = 0; });
     await page.getByText('高级设置', {exact: true}).click();
 
+    await verifySelectUI();
+
     // Selecting an input changes readiness, not collected-content metrics.
     await page.locator('#sampleButton').click();
-    await page.locator('#dateMode').selectOption('quarter');
+    await page.locator('#dateMode').selectOption('quarter', {force: true});
     await page.locator('#quarterYear').fill('2024');
-    await page.locator('#quarter').selectOption('1');
-    await page.locator('#timeZone').selectOption('UTC');
+    await page.locator('#quarter').selectOption('1', {force: true});
+    await page.locator('#timeZone').selectOption('UTC', {force: true});
     const savedBy = Date.now() + 10000;
     let savedSettings;
     do {
@@ -343,7 +486,12 @@ const reviewRows = [
         await appearance(mode, style, effectiveTheme);
         await noHorizontalOverflow(`Desktop ${style}/${mode}`);
         assert.deepEqual(await retainedCollection(), retained, `${style}/${mode} must retain collection state`);
-        if (mode !== 'system') await screenshot(`desktop-${style}-${mode}`);
+        if (mode !== 'system') {
+          await screenshot(`desktop-${style}-${mode}`);
+          if (style === 'tech' && mode === 'light') await screenshotSelect('themeMode', 'desktop-tech-light-select-theme');
+          await screenshotSelect('dateMode', `desktop-${style}-${mode}-select`);
+          await page.locator('.settings-scroll').evaluate(element => { element.scrollTop = 0; });
+        }
       }
     }
     await page.emulateMedia({colorScheme: 'dark'});
@@ -400,6 +548,7 @@ const reviewRows = [
     // design styles, including the last field near the end of the settings.
     for (const style of ['tech', 'classic']) {
       await appearance(style === 'tech' ? 'dark' : 'light', style, style === 'tech' ? 'dark' : 'light');
+      await screenshotSelect('dateMode', `mobile-320-${style}-select`);
       await page.getByText('高级设置', {exact: true}).click();
       await verifyHelp(0, `Mobile ${style} first help`);
       await verifyHelp(helpCount - 1, `Mobile ${style} last help`);
@@ -426,7 +575,7 @@ const reviewRows = [
     assert.match(await page.locator('#progressBar').getAttribute('aria-valuetext'), /采集已停止/);
     assert.deepEqual(errors, []);
     assert.deepEqual(externalRequests, [], 'UI rendering and local fixtures must not contact any remote service');
-    console.log(`PASS ${context.browser().version()}: six appearance combinations, system color changes and reload persistence, accessible hover/focus/click help, fixed desktop actions, 390/320px layout, preserved deduplicated results, and zero collection/network requests. Previews: ${previewDirectory}`);
+    console.log(`PASS ${context.browser().version()}: themed selects with mouse/keyboard/typeahead/dynamic options, six appearance combinations, system color changes and reload persistence, accessible hover/focus/click help, fixed desktop actions, 390/320px layout, preserved deduplicated results, and zero collection/network requests. Previews: ${previewDirectory}`);
   } catch (error) {
     if (page && !page.isClosed()) await screenshot('failure').catch(() => {});
     throw error;

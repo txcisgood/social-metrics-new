@@ -1,3 +1,5 @@
+// Native selects retain the form model behind the enhanced combobox.
+// This suite sets that model; extension-ui-browser.cjs tests actual dropdown interaction.
 /* Offline integration test: a fresh browser profile behind a mandatory local
  * fixture proxy; no real Instagram account or API key. Requires OpenSSL for
  * its temporary TLS certificate. Set PLAYWRIGHT_MODULE / BROWSER_EXECUTABLE /
@@ -213,7 +215,7 @@ async function localFixtureProxy(directory, handler) {
     const beforeTemplates = requests.length;
     let instagramTemplate;
     for (const [platform, label] of [['instagram', 'Instagram'], ['youtube', 'YouTube'], ['all', '混合']]) {
-      await page.locator('#platformSelect').selectOption(platform);
+      await page.locator('#platformSelect').selectOption(platform, {force: true});
       assert.equal(await page.locator('#downloadTemplate').textContent(), `下载 ${label}模板`);
       const pendingTemplate = page.waitForEvent('download');
       await page.locator('#downloadTemplate').click();
@@ -237,7 +239,7 @@ async function localFixtureProxy(directory, handler) {
     await page.waitForFunction(() => document.querySelector('#fileInfo').textContent.includes('1 个可识别账号'));
     assert.equal(await page.locator('#sheetSelect').inputValue(), '账号清单');
     assert.equal(await page.locator('#warnings li').count(), 0);
-    await page.locator('#platformSelect').selectOption('instagram');
+    await page.locator('#platformSelect').selectOption('instagram', {force: true});
     // The Instagram-only job must not request YouTube; the sentinel exercises
     // redaction if a later diagnostic happens to mention the entered key.
     await page.locator('#youtubeKey').evaluate((element, value) => { element.value = value; }, PRIVATE_KEY);
@@ -256,13 +258,13 @@ async function localFixtureProxy(directory, handler) {
     assert.equal(await page.locator('#quarterYear').inputValue(), current.year);
     assert.equal(await page.locator('#quarter').inputValue(), current.quarter);
     const beforeDateSelection = requests.length;
-    await page.locator('#dateMode').selectOption('month');
+    await page.locator('#dateMode').selectOption('month', {force: true});
     assert.equal(await page.locator('#monthField').isVisible(), true);
     assert.equal(await page.locator('#daysField').isVisible(), false);
     await page.locator('#targetMonth').fill('2024-02');
     assert.equal(await page.locator('#datePreview').textContent(), '2024-02-01 至 2024-02-29 · 共 29 天');
     assert.equal(await page.locator('#datePreviewHint').isVisible(), false);
-    await page.locator('#dateMode').selectOption('quarter');
+    await page.locator('#dateMode').selectOption('quarter', {force: true});
     assert.equal(await page.locator('#monthField').isVisible(), false);
     assert.equal(await page.locator('#quarterField').isVisible(), true);
     await page.locator('#quarterYear').fill('2024');
@@ -270,13 +272,13 @@ async function localFixtureProxy(directory, handler) {
       ['1', '2024-01-01 至 2024-03-31 · 共 91 天'], ['2', '2024-04-01 至 2024-06-30 · 共 91 天'],
       ['3', '2024-07-01 至 2024-09-30 · 共 92 天'], ['4', '2024-10-01 至 2024-12-31 · 共 92 天'],
     ]) {
-      await page.locator('#quarter').selectOption(quarter);
+      await page.locator('#quarter').selectOption(quarter, {force: true});
       assert.equal(await page.locator('#datePreview').textContent(), expected);
     }
     await page.locator('#quarterYear').fill('2099');
     assert.equal(await page.locator('#datePreview').textContent(), '2099-10-01 至 2099-12-31 · 共 92 天');
     assert.match(await page.locator('#datePreviewHint').textContent(), /尚未全部结束/);
-    await page.locator('#dateMode').selectOption('range');
+    await page.locator('#dateMode').selectOption('range', {force: true});
     assert.equal(await page.locator('#quarterField').isVisible(), false);
     assert.equal(await page.locator('#rangeField').isVisible(), true);
     await page.locator('#startDate').fill('2023-12-31');
@@ -290,7 +292,7 @@ async function localFixtureProxy(directory, handler) {
     assert.equal(requests.length, beforeDateSelection, 'Invalid date range must not start collection');
     assert.equal((await savedResults(page)).length, 0);
     assert.ok(!/Error:|at .*\.mjs/.test(await page.locator('#problemPanel').textContent()));
-    await page.locator('#dateMode').selectOption('month');
+    await page.locator('#dateMode').selectOption('month', {force: true});
     await page.locator('#targetMonth').fill(current.month);
     const selectedMonthLabel = (await page.locator('#datePreview').textContent()).split(' · ')[0];
     assert.equal(await page.locator('#maxPosts').inputValue(), '40');
@@ -338,9 +340,9 @@ async function localFixtureProxy(directory, handler) {
     // The normal site page loads one batch itself. Observing that response
     // supplies all fields without a second page navigation or extra API call.
     responseMode = 'passive';
-    await page.locator('#dateMode').selectOption('quarter');
+    await page.locator('#dateMode').selectOption('quarter', {force: true});
     await page.locator('#quarterYear').fill(current.year);
-    await page.locator('#quarter').selectOption(current.quarter);
+    await page.locator('#quarter').selectOption(current.quarter, {force: true});
     const selectedQuarterLabel = (await page.locator('#datePreview').textContent()).split(' · ')[0];
     const beforePassive = requests.length;
     await page.locator('#startButton').click();
@@ -363,10 +365,10 @@ async function localFixtureProxy(directory, handler) {
     // A historical cross-year selection filters the fixture by its publication
     // date, and survives reload without replacing it with today's defaults.
     fixtureTimestamp = '2024-01-01T12:00:00Z';
-    await page.locator('#dateMode').selectOption('range');
+    await page.locator('#dateMode').selectOption('range', {force: true});
     await page.locator('#startDate').fill('2023-12-31');
     await page.locator('#endDate').fill('2024-01-01');
-    await page.locator('#timeZone').selectOption('UTC');
+    await page.locator('#timeZone').selectOption('UTC', {force: true});
     await page.locator('#startButton').click();
     await page.waitForFunction(() => document.querySelector('#statusText').textContent === '采集中');
     for (const selector of ['#dateMode', '#targetMonth', '#quarterYear', '#quarter', '#startDate', '#endDate', '#timeZone']) {
@@ -391,7 +393,7 @@ async function localFixtureProxy(directory, handler) {
     assert.equal(await page.locator('#timeZone').inputValue(), 'UTC');
     assert.equal(await page.locator('#datePreview').textContent(), '2023-12-31 至 2024-01-01 · 共 2 天');
     await page.locator('#sampleButton').click();
-    await page.locator('#dateMode').selectOption('days');
+    await page.locator('#dateMode').selectOption('days', {force: true});
     fixtureTimestamp = new Date().toISOString();
     await page.getByText('高级设置', {exact: true}).click();
     await page.locator('#minDelay').fill('3');
@@ -534,8 +536,8 @@ async function localFixtureProxy(directory, handler) {
     // Appearance and explanations remain usable while a real collector is
     // waiting on the local fixture, without restarting or changing its options.
     const runningBeforeAppearance = await page.evaluate(async () => (await chrome.storage.session.get('lastRun')).lastRun);
-    await page.locator('#themeMode').selectOption('light');
-    await page.locator('#interfaceStyle').selectOption('classic');
+    await page.locator('#themeMode').selectOption('light', {force: true});
+    await page.locator('#interfaceStyle').selectOption('classic', {force: true});
     assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
     assert.equal(await page.locator('body').getAttribute('data-state'), 'running');
     assert.equal(await page.locator('#maxPages').isDisabled(), true);
@@ -551,8 +553,8 @@ async function localFixtureProxy(directory, handler) {
     assert.deepEqual(runningAfterAppearance.results, runningBeforeAppearance.results);
     assert.equal(runningAfterAppearance.running, true);
     assert.equal(await page.locator('#requestCount').textContent(), '1');
-    await page.locator('#interfaceStyle').selectOption('tech');
-    await page.locator('#themeMode').selectOption('dark');
+    await page.locator('#interfaceStyle').selectOption('tech', {force: true});
+    await page.locator('#themeMode').selectOption('dark', {force: true});
     const second = await context.newPage();
     await second.goto(`chrome-extension://${id}/index.html`);
     await second.locator('#warnings').getByText(/另一个工作页正在采集/).waitFor();

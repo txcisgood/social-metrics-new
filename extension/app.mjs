@@ -10,9 +10,11 @@ import {persistDiagnostics, latestDiagnostics, clearStoredDiagnostics} from './l
 import {createPreferencesStore, PREFERENCE_FIELDS} from './lib/preferences.mjs';
 import {APPEARANCE_CHOICES, createAppearanceController} from './lib/appearance.mjs';
 import {initSettingHelp} from './lib/help.mjs';
+import {initSelectControls} from './lib/select.mjs';
 
 const $ = id => document.getElementById(id);
 const appearance = createAppearanceController();
+const selectControls = initSelectControls();
 initSettingHelp();
 const editedAppearanceFields = new Set();
 function applyAppearance() {
@@ -88,6 +90,7 @@ function restorePreferences(saved) {
     if (dateFields.includes(id)) editedDateFields.add(id);
   }
   applyAppearance();
+  selectControls.refresh();
   $('rememberYoutubeKey').checked = saved.rememberYoutubeKey;
   $('youtubeKey').value = saved.youtubeKey || '';
   diagnostics.addSecret($('youtubeKey').value);
@@ -307,6 +310,7 @@ function renderControls() {
     : '优先读取目标日期附近的帖子。更早的内容会尽快跳过，未能确认的范围会标记待核对。';
   if ($('instagramAdvanced')) $('instagramAdvanced').hidden = $('platformSelect').value === 'youtube';
   renderWorkspaceState();
+  selectControls.refresh();
 }
 
 // Recognize checkpoints produced before the explicit skipped flag was added.
@@ -388,13 +392,16 @@ function applySheet() {
 async function refreshTabs() {
   const previous = $('tabSelect').value;
   $('tabSelect').replaceChildren(new Option('请选择已登录的 Instagram 标签页', ''));
-  if (!extension) { $('tabStatus').textContent = '请在 Edge 或 Chrome 中加载此扩展后打开工作台。'; return; }
-  const tabs = (await chrome.tabs.query({url: 'https://www.instagram.com/*'})).filter(t => usableInstagramTab(t.url));
-  for (const tab of tabs) $('tabSelect').add(new Option(`${tab.title || 'Instagram'}（标签 ${tab.id}）`, String(tab.id)));
-  if (tabs.some(t => String(t.id) === previous)) $('tabSelect').value = previous;
-  else if (tabs.length === 1) $('tabSelect').value = String(tabs[0].id);
-  $('tabStatus').textContent = tabs.length ? '请选择已完成登录的页面。登录是否有效，以实际读取结果为准。' : '未找到可用页面。请在当前浏览器的同一用户配置中打开 Instagram、登录，再刷新标签页。';
-  recordEvent('tabs.checked', {stage: 'tabs', count: tabs.length});
+  selectControls.refresh();
+  try {
+    if (!extension) { $('tabStatus').textContent = '请在 Edge 或 Chrome 中加载此扩展后打开工作台。'; return; }
+    const tabs = (await chrome.tabs.query({url: 'https://www.instagram.com/*'})).filter(t => usableInstagramTab(t.url));
+    for (const tab of tabs) $('tabSelect').add(new Option(`${tab.title || 'Instagram'}（标签 ${tab.id}）`, String(tab.id)));
+    if (tabs.some(t => String(t.id) === previous)) $('tabSelect').value = previous;
+    else if (tabs.length === 1) $('tabSelect').value = String(tabs[0].id);
+    $('tabStatus').textContent = tabs.length ? '请选择已完成登录的页面。登录是否有效，以实际读取结果为准。' : '未找到可用页面。请在当前浏览器的同一用户配置中打开 Instagram、登录，再刷新标签页。';
+    recordEvent('tabs.checked', {stage: 'tabs', count: tabs.length});
+  } finally { selectControls.refresh(); }
 }
 
 async function saveSnapshot(snapshot) {
