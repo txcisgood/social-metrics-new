@@ -13,7 +13,7 @@ const http = require('node:http');
 const https = require('node:https');
 const net = require('node:net');
 const {execFileSync} = require('node:child_process');
-const XLSX = require('../edge-extension/vendor/xlsx.full.min.js');
+const XLSX = require('../extension/vendor/xlsx.full.min.js');
 
 const PRIVATE_KEY = 'OFFLINE_SECRET_API_KEY_9281_DO_NOT_LOG';
 const PRIVATE_CAPTION = '=1+2 <script>PRIVATE_CAPTION_UNTRUSTED</script>';
@@ -44,10 +44,10 @@ function profileHTML(username, mode) {
     </script>` : ''}</body></html>`;
 }
 
-function postHTML(shortcode) {
+function postHTML(shortcode, timestamp) {
   return `<html><head><title>Instagram offline post</title></head><body><main><article>
     <header><a href="/team_foxer/">team_foxer</a></header><h1>${escapeHTML(PRIVATE_CAPTION)}</h1>
-    <a href="/p/${shortcode}/"><time datetime="${new Date().toISOString()}">Today</time></a>
+    <a href="/p/${shortcode}/"><time datetime="${timestamp}">Fixture publication date</time></a>
     <a href="/p/${shortcode}/liked_by/"><span>88 likes</span></a><button>View all 3 comments</button>
     </article></main></body></html>`;
 }
@@ -137,7 +137,7 @@ async function localFixtureProxy(directory, handler) {
 (async () => {
   const extensionLoadMode = process.env.EXTENSION_LOAD_MODE || 'flags';
   assert.ok(['flags', 'cdp'].includes(extensionLoadMode), 'EXTENSION_LOAD_MODE must be flags or cdp');
-  const extensionPath = path.resolve(__dirname, '../edge-extension');
+  const extensionPath = path.resolve(__dirname, '../extension');
   const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'social-metrics-extension-test-'));
   let context, fixtureProxy;
   const requests = [];
@@ -145,6 +145,7 @@ async function localFixtureProxy(directory, handler) {
   const pageOwnedRequests = [];
   const fixtureErrors = [];
   let responseMode = 'ok';
+  let fixtureTimestamp = new Date().toISOString();
   let releaseRequest;
   let heldRequestStarted;
   let navigationStarted;
@@ -155,7 +156,7 @@ async function localFixtureProxy(directory, handler) {
         pageOwnedRequests.push(u.pathname);
         response.writeHead(200, {'Content-Type': 'application/json'});
         response.end(JSON.stringify({items: [{code: 'TEST_POST', user: {username: 'team_foxer'},
-          taken_at: Math.floor(Date.now() / 1000), like_count: 88, comment_count: 3, media_type: 1, caption: {text: PRIVATE_CAPTION}}]})); return;
+          taken_at: Math.floor(Date.parse(fixtureTimestamp) / 1000), like_count: 88, comment_count: 3, media_type: 1, caption: {text: PRIVATE_CAPTION}}]})); return;
       }
       if (/^\/(?:api|graphql|ajax)(?:\/|$)/.test(u.pathname)) {
         privateAPIRequests.push(u.pathname);
@@ -166,7 +167,7 @@ async function localFixtureProxy(directory, handler) {
       navigationStarted?.();
       const parts = u.pathname.split('/').filter(Boolean);
       if (responseMode === 'hold' && parts.length === 1) await new Promise(resolve => { releaseRequest = resolve; heldRequestStarted?.(); });
-      const body = ['p', 'reel'].includes(parts[0]) ? postHTML(parts[1]) : profileHTML(parts[0] || 'team_foxer', responseMode);
+      const body = ['p', 'reel'].includes(parts[0]) ? postHTML(parts[1], fixtureTimestamp) : profileHTML(parts[0] || 'team_foxer', responseMode);
       response.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store'}); response.end(body);
     });
     context = await chromium.launchPersistentContext(profile, {
@@ -243,6 +244,55 @@ async function localFixtureProxy(directory, handler) {
     await page.screenshot({path: path.join(os.tmpdir(), 'social-metrics-extension-empty.png'), fullPage: true});
     await page.locator('#sampleButton').click();
     await page.waitForFunction(() => document.querySelector('#tabSelect').value !== '');
+    // The form previews calendar ranges without reading Instagram. Defaults
+    // follow the selected timezone; a real run below uses the selected month.
+    const current = await page.evaluate(() => {
+      const parts = new Intl.DateTimeFormat('en-CA', {timeZone: document.querySelector('#timeZone').value,
+        year: 'numeric', month: '2-digit', day: '2-digit'}).formatToParts(new Date());
+      const p = Object.fromEntries(parts.map(part => [part.type, part.value]));
+      return {month: `${p.year}-${p.month}`, year: p.year, quarter: String(Math.ceil(Number(p.month) / 3))};
+    });
+    assert.equal(await page.locator('#targetMonth').inputValue(), current.month);
+    assert.equal(await page.locator('#quarterYear').inputValue(), current.year);
+    assert.equal(await page.locator('#quarter').inputValue(), current.quarter);
+    const beforeDateSelection = requests.length;
+    await page.locator('#dateMode').selectOption('month');
+    assert.equal(await page.locator('#monthField').isVisible(), true);
+    assert.equal(await page.locator('#daysField').isVisible(), false);
+    await page.locator('#targetMonth').fill('2024-02');
+    assert.equal(await page.locator('#datePreview').textContent(), '2024-02-01 至 2024-02-29 · 共 29 天');
+    assert.equal(await page.locator('#datePreviewHint').isVisible(), false);
+    await page.locator('#dateMode').selectOption('quarter');
+    assert.equal(await page.locator('#monthField').isVisible(), false);
+    assert.equal(await page.locator('#quarterField').isVisible(), true);
+    await page.locator('#quarterYear').fill('2024');
+    for (const [quarter, expected] of [
+      ['1', '2024-01-01 至 2024-03-31 · 共 91 天'], ['2', '2024-04-01 至 2024-06-30 · 共 91 天'],
+      ['3', '2024-07-01 至 2024-09-30 · 共 92 天'], ['4', '2024-10-01 至 2024-12-31 · 共 92 天'],
+    ]) {
+      await page.locator('#quarter').selectOption(quarter);
+      assert.equal(await page.locator('#datePreview').textContent(), expected);
+    }
+    await page.locator('#quarterYear').fill('2099');
+    assert.equal(await page.locator('#datePreview').textContent(), '2099-10-01 至 2099-12-31 · 共 92 天');
+    assert.match(await page.locator('#datePreviewHint').textContent(), /尚未全部结束/);
+    await page.locator('#dateMode').selectOption('range');
+    assert.equal(await page.locator('#quarterField').isVisible(), false);
+    assert.equal(await page.locator('#rangeField').isVisible(), true);
+    await page.locator('#startDate').fill('2023-12-31');
+    await page.locator('#endDate').fill('2024-01-01');
+    assert.equal(await page.locator('#datePreview').textContent(), '2023-12-31 至 2024-01-01 · 共 2 天');
+    await page.locator('#startDate').fill('2024-01-02');
+    assert.equal(await page.locator('#datePreview').getAttribute('data-invalid'), 'true');
+    assert.match(await page.locator('#datePreview').textContent(), /开始日期|起止日期/);
+    await page.locator('#startButton').click();
+    await page.waitForFunction(() => document.querySelector('#problemCode').textContent.includes('INVALID_INPUT'));
+    assert.equal(requests.length, beforeDateSelection, 'Invalid date range must not start collection');
+    assert.equal((await savedResults(page)).length, 0);
+    assert.ok(!/Error:|at .*\.mjs/.test(await page.locator('#problemPanel').textContent()));
+    await page.locator('#dateMode').selectOption('month');
+    await page.locator('#targetMonth').fill(current.month);
+    const selectedMonthLabel = (await page.locator('#datePreview').textContent()).split(' · ')[0];
     assert.equal(await page.locator('#maxPosts').inputValue(), '40');
     await page.getByText('高级设置', {exact: true}).click();
     await page.locator('#minDelay').fill('3');
@@ -271,6 +321,13 @@ async function localFixtureProxy(directory, handler) {
     assert.equal(result.Sheets['采集结果'].G2.t, 's');
     assert.equal(result.Sheets['采集结果'].G2.f, undefined);
     assert.equal(result.Sheets['采集结果'].N2.v, 88);
+    const monthSnapshot = await page.evaluate(async () => (await chrome.storage.session.get('lastRun')).lastRun);
+    assert.equal(monthSnapshot.options.dateMode, 'month');
+    assert.equal(monthSnapshot.options.targetDates[0], `${current.month}-01`);
+    assert.equal(monthSnapshot.meta['目标日期'], selectedMonthLabel);
+    const monthExportInfo = Object.fromEntries(XLSX.utils.sheet_to_json(result.Sheets['本次运行信息'], {header: 1}).slice(1));
+    assert.equal(monthExportInfo['日期模式'], '按月');
+    assert.equal(monthExportInfo['目标日期'], selectedMonthLabel);
     const priorRun = await page.evaluate(async () => (await chrome.storage.session.get('lastRun')).lastRun);
     const priorFileInfo = await page.locator('#fileInfo').textContent();
     const extraTemplate = page.waitForEvent('download'); await page.locator('#downloadTemplate').click(); await extraTemplate;
@@ -281,6 +338,10 @@ async function localFixtureProxy(directory, handler) {
     // The normal site page loads one batch itself. Observing that response
     // supplies all fields without a second page navigation or extra API call.
     responseMode = 'passive';
+    await page.locator('#dateMode').selectOption('quarter');
+    await page.locator('#quarterYear').fill(current.year);
+    await page.locator('#quarter').selectOption(current.quarter);
+    const selectedQuarterLabel = (await page.locator('#datePreview').textContent()).split(' · ')[0];
     const beforePassive = requests.length;
     await page.locator('#startButton').click();
     await page.waitForFunction(() => document.querySelector('#statusText').textContent === '采集中');
@@ -293,6 +354,48 @@ async function localFixtureProxy(directory, handler) {
     assert.equal(await page.locator('#igOperationCount').textContent(), '1');
     assert.match(await page.locator('#scanProgress').textContent(), /已开详情 0 条/);
     assert.deepEqual(privateAPIRequests, []);
+
+    const quarterSnapshot = await page.evaluate(async () => (await chrome.storage.session.get('lastRun')).lastRun);
+    assert.equal(quarterSnapshot.options.dateMode, 'quarter');
+    assert.equal(quarterSnapshot.meta['日期模式'], '按季度');
+    assert.equal(quarterSnapshot.meta['目标日期'], selectedQuarterLabel);
+    assert.ok(quarterSnapshot.options.targetDates.length >= 90);
+    // A historical cross-year selection filters the fixture by its publication
+    // date, and survives reload without replacing it with today's defaults.
+    fixtureTimestamp = '2024-01-01T12:00:00Z';
+    await page.locator('#dateMode').selectOption('range');
+    await page.locator('#startDate').fill('2023-12-31');
+    await page.locator('#endDate').fill('2024-01-01');
+    await page.locator('#timeZone').selectOption('UTC');
+    await page.locator('#startButton').click();
+    await page.waitForFunction(() => document.querySelector('#statusText').textContent === '采集中');
+    for (const selector of ['#dateMode', '#targetMonth', '#quarterYear', '#quarter', '#startDate', '#endDate', '#timeZone']) {
+      assert.equal(await page.locator(selector).isDisabled(), true);
+    }
+    await page.waitForFunction(() => document.querySelector('#statusText').textContent === '采集完成', null, {timeout: 20000});
+    const rangeSnapshot = await page.evaluate(async () => (await chrome.storage.session.get('lastRun')).lastRun);
+    assert.deepEqual(rangeSnapshot.options.targetDates, ['2023-12-31', '2024-01-01']);
+    assert.equal(rangeSnapshot.results[0].status, 'OK');
+    assert.equal(rangeSnapshot.results[0].published_local, '2024-01-01 12:00:00');
+    assert.equal(rangeSnapshot.meta['目标日期'], '2023-12-31 至 2024-01-01');
+    const rangeJsonPending = page.waitForEvent('download');
+    await page.locator('#exportJson').click();
+    const rangeJson = JSON.parse(await fs.readFile(await (await rangeJsonPending).path(), 'utf8'));
+    assert.equal(rangeJson.meta['日期模式'], '自定义起止日期');
+    assert.equal(rangeJson.meta['目标日期'], '2023-12-31 至 2024-01-01');
+    await page.reload();
+    await page.waitForFunction(() => document.querySelector('#statusText').textContent === '已恢复上次结果');
+    assert.equal(await page.locator('#dateMode').inputValue(), 'range');
+    assert.equal(await page.locator('#startDate').inputValue(), '2023-12-31');
+    assert.equal(await page.locator('#endDate').inputValue(), '2024-01-01');
+    assert.equal(await page.locator('#timeZone').inputValue(), 'UTC');
+    assert.equal(await page.locator('#datePreview').textContent(), '2023-12-31 至 2024-01-01 · 共 2 天');
+    await page.locator('#sampleButton').click();
+    await page.locator('#dateMode').selectOption('days');
+    fixtureTimestamp = new Date().toISOString();
+    await page.getByText('高级设置', {exact: true}).click();
+    await page.locator('#minDelay').fill('3');
+    await page.locator('#maxDelay').fill('3');
 
     // A page batch cap keeps confirmed posts and reports unknown coverage.
     responseMode = 'incomplete';
@@ -515,7 +618,7 @@ async function localFixtureProxy(directory, handler) {
     assert.equal(instagram.url(), 'https://www.instagram.com/team_foxer/');
     assert.deepEqual(privateAPIRequests, []);
     assert.deepEqual(errors, []);
-    console.log('PASS: platform template downloads and filled-template import, empty-input guidance, input/result preservation, export-only UI, per-account progress and counters, DOM fallback, passive page-owned response reuse (2 navigations reduced to 1), dedicated tabs, page/detail limits, literal Excel/JSON export, provenance, restriction stop, safe error UI, sanitized diagnostics, reload, cross-tab locks, cancellation and bootstrap fallback. Zero extension-initiated Instagram API calls; one site-owned fixture response observed; no live network.');
+    console.log('PASS: calendar month/quarter/custom ranges, leap February, four-quarter boundaries, range validation before requests, selected-range collection/export/recovery, platform template downloads and filled-template import, empty-input guidance, input/result preservation, export-only UI, per-account progress and counters, DOM fallback, passive page-owned response reuse (2 navigations reduced to 1), dedicated tabs, page/detail limits, literal Excel/JSON export, provenance, restriction stop, safe error UI, sanitized diagnostics, reload, cross-tab locks, cancellation and bootstrap fallback. Zero extension-initiated Instagram API calls; site-owned fixture responses observed; no live network.');
     console.log(`Screenshots: ${os.tmpdir()}/social-metrics-extension-{empty,results,mobile}.png`);
   } catch (error) {
     const worktab = context?.pages().find(candidate => candidate.url().startsWith('chrome-extension:'));

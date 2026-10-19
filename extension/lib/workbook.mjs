@@ -3,7 +3,7 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_ROWS = 50000;
 const MAX_COLUMNS = 512;
 const RESULT_HEADERS = [
-  "行号", "账号名", "平台", "主页链接", "目标日期", "当天有无发布", "作品标题",
+  "行号", "账号名", "平台", "主页链接", "目标日期", "期间有无发布", "作品标题",
   "作品链接", "发布时间(本地)", "类型", "时长", "粉丝数", "播放", "点赞", "评论", "抓取时间", "备注",
 ];
 const PLATFORM_TEXT = { youtube: "YouTube", instagram: "Instagram", facebook: "Facebook" };
@@ -320,7 +320,7 @@ export function createResultsWorkbook(results, meta = {}) {
         result.profile_url, result.error, result.error_action || failureSuggestion(result.error)]);
     }
   }
-  xlsx().utils.book_append_sheet(workbook, makeSheet(rows, [6, 22, 11, 38, 20, 13, 46, 40, 19, 11, 9, 12, 11, 11, 11, 19, 45], [3, 7]), "采集结果");
+  xlsx().utils.book_append_sheet(workbook, makeSheet(rows, [6, 22, 11, 38, 28, 13, 46, 40, 19, 11, 9, 12, 11, 11, 11, 19, 45], [3, 7]), "采集结果");
   xlsx().utils.book_append_sheet(workbook, makeSheet(failedRows, [6, 22, 11, 38, 50, 42], [3]), "待人工核对");
   const metaRows = [["项目", "值"], ...Object.entries(meta)];
   xlsx().utils.book_append_sheet(workbook, makeSheet(metaRows, [26, 70]), "本次运行信息");

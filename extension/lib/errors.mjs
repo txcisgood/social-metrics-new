@@ -54,6 +54,20 @@ function unknownError() {
   return describe('UNKNOWN_ERROR', '操作未完成', '插件遇到了未预料的问题，本次操作未完成。', '请复制诊断日志并反馈，以便定位问题。');
 }
 
+const dateInputErrors = {
+  INVALID_TIME_ZONE: ['请选择有效时区', '当前时区无法用于判断发布日期。', '在设置中重新选择时区，再检查采集日期范围。'],
+  INVALID_DAYS: ['请调整最近天数', '最近天数必须是 1 至 366 之间的整数。', '修改最近天数后重新开始。'],
+  INVALID_DATE: ['请选择有效日期', '目标日期为空或不是有效的日历日期。', '重新选择目标日期后再开始采集。'],
+  INVALID_MONTH: ['请选择有效月份', '月份为空或格式不正确，年份需在 1 至 9999 之间，月份需在 1 至 12 之间。', '在月份选择框中重新选择年份和月份后重试。'],
+  INVALID_QUARTER_YEAR: ['请调整季度年份', '季度年份必须是 1 至 9999 之间的整数。', '填写要采集的年份，再选择第一至第四季度。'],
+  INVALID_QUARTER: ['请选择有效季度', '尚未选择有效的季度。', '在季度选择框中选择第一、第二、第三或第四季度。'],
+  INVALID_RANGE_START: ['请选择有效的开始日期', '自定义范围的开始日期为空或不是有效的日历日期。', '重新选择开始日期，确认不晚于结束日期后重试。'],
+  INVALID_RANGE_END: ['请选择有效的结束日期', '自定义范围的结束日期为空或不是有效的日历日期。', '重新选择结束日期，确认不早于开始日期后重试。'],
+  DATE_RANGE_REVERSED: ['请调整日期先后顺序', '开始日期晚于结束日期。', '调整开始日期或结束日期，确保开始日期不晚于结束日期。'],
+  DATE_RANGE_TOO_LONG: ['请缩小日期范围', '一次最多采集 366 天，开始日期和结束日期都计入天数。', '缩小日期范围到 366 天以内；更长的时间段请分批采集。'],
+  INVALID_DATE_MODE: ['请重新选择日期范围', '当前日期范围类型无法识别。', '重新选择最近几天、指定日期、月份、季度或自定义范围后重试。'],
+};
+
 /** Never echo message, stack, filenames, URLs, tokens, or unrecognized codes. */
 export function describeError(error, {platform = '', stage = ''} = {}) {
   const message = typeof error === 'string' ? error.slice(0, 4000) : field(error, 'message');
@@ -88,6 +102,7 @@ export function describeError(error, {platform = '', stage = ''} = {}) {
       '检查浏览器的下载权限后重试，或尝试另一种导出格式；仍失败时请复制诊断日志反馈。');
   }
   if (['INTERNAL_FAILURE', 'UNKNOWN_ERROR'].includes(code)) return unknownError();
+  if (Object.hasOwn(dateInputErrors, code)) return describe('INVALID_INPUT', ...dateInputErrors[code]);
   // Clearing results or logs uses a storage operation, but a held job lock is
   // an actionable concurrency conflict rather than a storage malfunction.
   if (code === 'TASK_RUNNING' || /另一个.*(?:工作页|页面).*采集|任务.*(?:正在运行|已在运行)|task.*already running/i.test(message)) {

@@ -1,4 +1,5 @@
 /** Collect only data the normal Instagram pages have actually exposed. */
+import {dateRangeLabel} from './jobs.mjs';
 const MISSING = '未公开或不可用';
 const RESERVED = new Set(['p', 'reel', 'reels', 'tv', 'stories', 'explore', 'accounts', 'direct', 'about', 'legal']);
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -60,12 +61,6 @@ function localTime(date, formatter) {
   return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
 }
 
-function dateLabel(dates) {
-  if (dates.length === 1) return dates[0];
-  return dates.slice(1).every((date, i) => Date.parse(date) - Date.parse(dates[i]) === 86400000)
-    ? `${dates[0]}~${dates.at(-1)}` : dates.join(',');
-}
-
 function checkCancelled(signal) {
   if (signal?.aborted) throw failure('CANCELLED', '用户已停止本次采集。');
 }
@@ -119,7 +114,7 @@ export async function collectInstagramPage(account, options, reader) {
   let explicitComplete = false, uncertain = false, loading = false;
   let pageCount = 0, detailCount = 0, stopReason = '';
   const base = () => ({row_no: account.row_no, account_name: account.name, platform: 'instagram', profile_url: account.url,
-    target_date: dateLabel(dates), status: 'OK', post_title: '', post_url: '', published_local: '', published_utc: '',
+    target_date: dateRangeLabel(dates), status: 'OK', post_title: '', post_url: '', published_local: '', published_utc: '',
     post_type: '', view_count: '', like_count: '', comment_count: '', follower_count: metadata.followers ?? MISSING,
     channel_id: username, fetched_at: localTime(new Date(), formatter), error: '',
     extra: {'备注': [account.note || '', '数据来自 Instagram 正常页面；隐藏指标不计为零'].filter(Boolean).join(' '), '时长': ''}});

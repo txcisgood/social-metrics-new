@@ -1,4 +1,4 @@
-import {localDate} from './jobs.mjs';
+import {localDate, dateRangeLabel} from './jobs.mjs';
 
 const CHANNEL = /^UC[A-Za-z0-9_-]{22}$/;
 const TRAILING = new Set(['videos', 'featured', 'shorts', 'streams', 'playlists', 'community', 'about', 'live', 'podcasts', 'releases', 'search']);
@@ -57,7 +57,7 @@ export async function collectYouTube(account, options, request) {
   const playlistId = channel?.contentDetails?.relatedPlaylists?.uploads;
   if (!playlistId) throw new Error('该频道没有可读取的上传列表');
   const base = {row_no: account.row_no, account_name: account.name, platform: 'youtube', profile_url: account.url,
-    target_date: options.targetDates.join(','), channel_id: id,
+    target_date: dateRangeLabel(options.targetDates), channel_id: id,
     follower_count: channel.statistics?.hiddenSubscriberCount ? '未公开' : number(channel.statistics?.subscriberCount),
     fetched_at: localTime(Date.now(), options.timeZone), extra: {备注: account.note || ''}};
   const start = [...options.targetDates].sort()[0];

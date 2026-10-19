@@ -3,7 +3,7 @@ import {collectInstagramPage} from './lib/instagram-page.mjs';
 import {createInstagramPageReader} from './lib/instagram-page-reader.mjs';
 import {collectYouTube} from './lib/youtube.mjs';
 import {usableInstagramTab, createYouTubeRequest} from './lib/transport.mjs';
-import {resolveDates, localDate, runAccounts, failedRow} from './lib/jobs.mjs';
+import {resolveDates, dateRangeLabel, localDate, runAccounts, failedRow} from './lib/jobs.mjs';
 import {describeError} from './lib/errors.mjs';
 import {createDiagnostics} from './lib/diagnostics.mjs';
 import {persistDiagnostics, latestDiagnostics, clearStoredDiagnostics} from './lib/diagnostic-store.mjs';
@@ -24,6 +24,50 @@ const diagnosticEnvironment = {
   platform: navigator.userAgentData?.platform || navigator.platform || 'unknown'
 };
 let diagnostics = createDiagnostics(diagnosticEnvironment);
+const dateFields = ['dateMode', 'days', 'targetDate', 'targetMonth', 'quarterYear', 'quarter', 'startDate', 'endDate', 'timeZone'];
+const editedDateFields = new Set();
+const dateModeLabels = {days: '最近几天', date: '指定一天', month: '按月', quarter: '按季度', range: '自定义起止日期'};
+
+function dateOptionsFromForm() {
+  return {dateMode: $('dateMode').value, days: Number($('days').value), targetDate: $('targetDate').value,
+    targetMonth: $('targetMonth').value, quarterYear: Number($('quarterYear').value), quarter: Number($('quarter').value),
+    startDate: $('startDate').value, endDate: $('endDate').value, timeZone: $('timeZone').value};
+}
+
+function updateDateDefaults() {
+  const today = localDate(Date.now(), $('timeZone').value);
+  const defaults = {targetDate: today, targetMonth: today.slice(0, 7), quarterYear: today.slice(0, 4),
+    quarter: String(Math.ceil(Number(today.slice(5, 7)) / 3)), startDate: today, endDate: today};
+  for (const [id, value] of Object.entries(defaults)) if (!editedDateFields.has(id)) $(id).value = value;
+}
+
+function renderDatePreview() {
+  const preview = $('datePreview'), hint = $('datePreviewHint');
+  hint.hidden = true; hint.textContent = '';
+  try {
+    const options = dateOptionsFromForm(), dates = resolveDates(options);
+    preview.textContent = `${dateRangeLabel(dates)} · 共 ${dates.length} 天`;
+    preview.dataset.invalid = 'false';
+    if (dates.at(-1) >= localDate(Date.now(), options.timeZone)) {
+      hint.textContent = '所选日期尚未全部结束，仅能读取目前已发布的内容；保留完整日期范围。';
+      hint.hidden = false;
+    }
+  } catch (error) {
+    const info = describeError(error, {stage: 'start'});
+    preview.textContent = `${info.title}。${info.action}`;
+    preview.dataset.invalid = 'true';
+  }
+}
+
+function restoreDateOptions(options = {}) {
+  for (const id of dateFields) {
+    if (options[id] === undefined) continue;
+    const element = $(id), value = String(options[id]);
+    if (element.tagName === 'SELECT' && !Array.from(element.options).some(option => option.value === value)) continue;
+    element.value = value; editedDateFields.add(id);
+  }
+  updateDateDefaults();
+}
 
 function refreshDiagnosticText() {
   if ($('diagnosticsDetails').open) $('diagnosticText').value = diagnostics.text();
@@ -154,6 +198,10 @@ function renderControls() {
   $('exportJson').disabled = !results.length || busy;
   $('daysField').hidden = $('dateMode').value !== 'days';
   $('dateField').hidden = $('dateMode').value !== 'date';
+  $('monthField').hidden = $('dateMode').value !== 'month';
+  $('quarterField').hidden = $('dateMode').value !== 'quarter';
+  $('rangeField').hidden = $('dateMode').value !== 'range';
+  renderDatePreview();
   $('instagramSection').hidden = $('platformSelect').value === 'youtube';
   $('youtubeSection').hidden = $('platformSelect').value === 'instagram';
   $('scanModeField').hidden = $('platformSelect').value === 'youtube';
@@ -211,8 +259,7 @@ async function saveSnapshot(snapshot) {
 }
 
 function optionsFromForm() {
-  const settings = {dateMode: $('dateMode').value, days: Number($('days').value), targetDate: $('targetDate').value,
-    timeZone: $('timeZone').value, maxPages: Number($('maxPages').value), maxPosts: Number($('maxPosts').value),
+  const settings = {...dateOptionsFromForm(), maxPages: Number($('maxPages').value), maxPosts: Number($('maxPosts').value),
     minDelay: Number($('minDelay').value), maxDelay: Number($('maxDelay').value), scanMode: $('scanMode').value};
   if (!Number.isInteger(settings.maxPages) || settings.maxPages < 1 || settings.maxPages > 50) throw new Error('分页上限必须在 1 至 50 之间');
   if (!Number.isInteger(settings.maxPosts) || settings.maxPosts < 1 || settings.maxPosts > 500) throw new Error('每账号详情访问上限必须在 1 至 500 之间');
@@ -238,7 +285,8 @@ async function startJob() {
     if (!lock) throw new Error('另一个插件工作页正在采集，请回到该页面查看或停止');
     await flushDiagnostics();
     diagnostics = createDiagnostics({...diagnosticEnvironment, secrets: [apiKey]});
-    diagnostics.setContext({...options, accountCount: selected.length, platform: $('platformSelect').value});
+    diagnostics.setContext({...options, startDate: options.targetDates[0], endDate: options.targetDates.at(-1),
+      accountCount: selected.length, platform: $('platformSelect').value});
     logStorageFailed = false;
     busy = true; controller = new AbortController(); results = []; requestCount = 0; storageWarned = false;
     igOperationCount = 0; ytRequestCount = 0; startedAt = Date.now(); elapsedMs = 0; waitUntil = 0;
@@ -252,7 +300,8 @@ async function startJob() {
       $('progressBar').value = 0; $('progressBar').max = selected.length;
       $('requestCount').textContent = '0'; $('statusText').textContent = '采集中';
       setPhase(`准备读取 ${selected[0].name}（共 ${selected.length} 个账号）`);
-      meta = {inputName: inputName || '账号文件', '目标日期': options.targetDates.join(','), '判定时区': options.timeZone,
+      meta = {inputName: inputName || '账号文件', '日期模式': dateModeLabels[options.dateMode],
+        '目标日期': dateRangeLabel(options.targetDates), '日期天数': options.targetDates.length, '判定时区': options.timeZone,
         '账号数': selected.length, '分页上限': options.maxPages, '详情访问上限': options.maxPosts,
         'Instagram采集方式': options.scanMode === 'recent' ? '按日期快速检查' : '继续检查更多内容', '开始时间': new Date().toISOString(),
         '说明': 'Instagram 读取正常网页；页面操作次数不等于网络请求次数。未查全会另列待核对项。YouTube Shorts 仅按时长提示，需手动核对。'};
@@ -264,7 +313,7 @@ async function startJob() {
         onRequest: () => onRequest('instagram'), onDiagnostic, onProgress: readerProgress});
       const ytRequest = createYouTubeRequest(apiKey, {signal: controller.signal, onRequest: () => onRequest('youtube'), onDiagnostic});
       renderResults();
-      log(`开始采集 ${selected.length} 个账号；日期 ${options.targetDates[0]} 至 ${options.targetDates.at(-1)}（${options.timeZone}）`);
+      log(`开始采集 ${selected.length} 个账号；${dateModeLabels[options.dateMode]} ${dateRangeLabel(options.targetDates)}（共 ${options.targetDates.length} 天，${options.timeZone}）`);
       recordEvent('run.started', {stage: 'collect', accountCount: selected.length});
       await saveSnapshot({results, pending: selected, options, meta, running: true});
       results = await runAccounts(selected, options, {
@@ -359,7 +408,12 @@ $('sampleButton').addEventListener('click', guard(() => {
   $('warnings').replaceChildren(); $('progressText').textContent = '示例已就绪，选择登录标签页后开始'; renderControls();
 }));
 $('refreshTabs').addEventListener('click', guard(refreshTabs, 'tabs'));
-['dateMode', 'platformSelect', 'scanMode'].forEach(id => $(id).addEventListener('change', renderControls));
+['platformSelect', 'scanMode'].forEach(id => $(id).addEventListener('change', renderControls));
+for (const id of dateFields) $(id).addEventListener('input', () => {
+  editedDateFields.add(id);
+  if (id === 'timeZone') updateDateDefaults();
+  renderControls();
+});
 $('startButton').addEventListener('click', guard(startJob, 'start'));
 $('stopButton').addEventListener('click', () => {
   controller?.abort(); $('statusText').textContent = '正在停止'; renderControls();
@@ -443,7 +497,7 @@ window.__metricsReportError = showError;
 async function init() {
   loading = true;
   try {
-    $('targetDate').value = localDate(Date.now(), $('timeZone').value);
+    updateDateDefaults();
     if (extension && navigator.locks) {
       // A second open tab must not convert the first tab's active task to interrupted.
       await navigator.locks.request('social-metrics-collection', {ifAvailable: true}, async lock => {
@@ -467,6 +521,7 @@ async function init() {
         } catch (error) { showError(error, 'storage'); }
         if (saved?.results) {
           results = saved.results; meta = saved.meta || {};
+          restoreDateOptions(saved.options);
           if (saved.running) {
             recordEvent('run.recovered_interrupted', {stage: 'restore', pendingCount: saved.pending?.length || 0}, 'warning');
             results.push(...(saved.pending || []).map(a => failedRow(a, saved.options,

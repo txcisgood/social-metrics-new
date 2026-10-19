@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {collectInstagramPage} from '../edge-extension/lib/instagram-page.mjs';
+import {collectInstagramPage} from '../extension/lib/instagram-page.mjs';
 
 const ACCOUNT = {row_no: 2, name: 'Creator', url: 'https://www.instagram.com/test.creator/', platform: 'instagram', note: '备注'};
 const OPTIONS = {targetDates: ['2026-08-29'], timeZone: 'Europe/London', maxPages: 2, maxPosts: 40};

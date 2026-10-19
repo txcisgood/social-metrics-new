@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {createInstagramPageReader} from '../edge-extension/lib/instagram-page-reader.mjs';
-import {installInstagramPageObserver, readInstagramPageObserver} from '../edge-extension/lib/instagram-page-observer.mjs';
-import {instagramPageSnapshot} from '../edge-extension/lib/instagram-page-snapshot.mjs';
-import {createDiagnostics} from '../edge-extension/lib/diagnostics.mjs';
-import {collectInstagramPage} from '../edge-extension/lib/instagram-page.mjs';
+import {createInstagramPageReader} from '../extension/lib/instagram-page-reader.mjs';
+import {installInstagramPageObserver, readInstagramPageObserver} from '../extension/lib/instagram-page-observer.mjs';
+import {instagramPageSnapshot} from '../extension/lib/instagram-page-snapshot.mjs';
+import {createDiagnostics} from '../extension/lib/diagnostics.mjs';
+import {collectInstagramPage} from '../extension/lib/instagram-page.mjs';
 
 const SOURCE_ID = 17;
 const WINDOW_ID = 6;

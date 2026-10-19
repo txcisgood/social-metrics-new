@@ -8,3 +8,7 @@ __pycache__/
 .idea/
 .DS_Store
 .workbuddy/
+
+# Personal input workbooks from the former Python workflow stay local.
+/网红list.xlsx
+/smetrics/网红list.xlsx

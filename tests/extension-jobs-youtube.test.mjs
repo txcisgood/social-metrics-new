@@ -1,16 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {localDate, resolveDates, runAccounts} from '../edge-extension/lib/jobs.mjs';
-import {collectYouTube, videoType} from '../edge-extension/lib/youtube.mjs';
+import {dateRangeLabel, localDate, resolveDates, runAccounts} from '../extension/lib/jobs.mjs';
+import {collectYouTube, videoType} from '../extension/lib/youtube.mjs';
 import {
-  allowedInstagramPath, usableInstagramTab, createInstagramRequest, instagramPageGet,
+  usableInstagramTab,
   createYouTubeRequest, delay,
-} from '../edge-extension/lib/transport.mjs';
+} from '../extension/lib/transport.mjs';
 
 const OPTIONS = {targetDates: ['2026-08-29'], timeZone: 'Europe/London', maxPages: 3};
 const CHANNEL_ID = 'UC' + 'A'.repeat(22);
 const YT = {row_no: 2, name: 'Test channel', url: `https://www.youtube.com/channel/${CHANNEL_ID}`, platform: 'youtube'};
-const IG_PATH = '/api/v1/users/web_profile_info/?username=test';
 const account = (row_no, platform) => ({row_no, platform, name: `Account ${row_no}`, url: `https://${platform}.com/test`});
 const error = (code, message = code) => Object.assign(new Error(message), {code});
 
@@ -167,6 +166,111 @@ test('invalid explicit dates and recent-day limits fail', () => {
   for (const days of [0, -1, 367, 1.5]) assert.throws(() => resolveDates({dateMode: 'days', days, timeZone: 'UTC'}));
 });
 
+test('month selections include the complete month and handle Gregorian leap-year rules', () => {
+  for (const [targetMonth, length, end] of [
+    ['2026-01', 31, '2026-01-31'], ['2026-04', 30, '2026-04-30'],
+    ['2024-02', 29, '2024-02-29'], ['2026-02', 28, '2026-02-28'],
+    ['1900-02', 28, '1900-02-28'], ['2000-02', 29, '2000-02-29'],
+  ]) {
+    const dates = resolveDates({dateMode: 'month', targetMonth, timeZone: 'Asia/Shanghai'}, new Date('2026-01-10T00:00:00Z'));
+    assert.equal(dates.length, length);
+    assert.equal(dates[0], `${targetMonth}-01`);
+    assert.equal(dates.at(-1), end);
+    assert.equal(new Set(dates).size, length);
+  }
+});
+
+test('all four quarters use inclusive calendar boundaries and are not truncated at today', () => {
+  for (const [quarter, first, last, length] of [
+    [1, '2026-01-01', '2026-03-31', 90], [2, '2026-04-01', '2026-06-30', 91],
+    [3, '2026-07-01', '2026-09-30', 92], [4, '2026-10-01', '2026-12-31', 92],
+  ]) {
+    const dates = resolveDates({dateMode: 'quarter', quarterYear: 2026, quarter, timeZone: 'Europe/London'}, new Date('2026-10-20T00:00:00Z'));
+    assert.equal(dates[0], first); assert.equal(dates.at(-1), last); assert.equal(dates.length, length);
+    assert.equal(new Set(dates).size, length);
+  }
+  const leapQuarter = resolveDates({dateMode: 'quarter', quarterYear: 2024, quarter: 1, timeZone: 'UTC'});
+  assert.equal(leapQuarter.length, 91); assert.ok(leapQuarter.includes('2024-02-29'));
+});
+
+test('custom ranges include both endpoints, allow one day and cross year boundaries', () => {
+  assert.deepEqual(resolveDates({dateMode: 'range', startDate: '2026-12-30', endDate: '2027-01-02', timeZone: 'UTC'}),
+    ['2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02']);
+  assert.deepEqual(resolveDates({dateMode: 'range', startDate: '2024-02-29', endDate: '2024-02-29', timeZone: 'UTC'}), ['2024-02-29']);
+  const leapYear = resolveDates({dateMode: 'range', startDate: '2024-01-01', endDate: '2024-12-31', timeZone: 'UTC'});
+  assert.equal(leapYear.length, 366); assert.ok(leapYear.includes('2024-02-29'));
+  assert.throws(() => resolveDates({dateMode: 'range', startDate: '2024-01-01', endDate: '2025-01-01', timeZone: 'UTC'}),
+    value => value.code === 'DATE_RANGE_TOO_LONG');
+  assert.throws(() => resolveDates({dateMode: 'range', startDate: '2026-04-01', endDate: '2026-03-31', timeZone: 'UTC'}),
+    value => value.code === 'DATE_RANGE_REVERSED');
+});
+
+test('range and recent-day enumeration never skips or duplicates dates at DST changes', () => {
+  for (const timeZone of ['Europe/London', 'America/New_York', 'Australia/Sydney']) {
+    const dates = resolveDates({dateMode: 'range', startDate: '2026-03-28', endDate: '2026-03-30', timeZone});
+    assert.deepEqual(dates, ['2026-03-28', '2026-03-29', '2026-03-30']);
+  }
+  assert.deepEqual(resolveDates({dateMode: 'days', days: 3, timeZone: 'Europe/London'}, new Date('2026-10-26T12:00:00Z')),
+    ['2026-10-24', '2026-10-25', '2026-10-26']);
+  assert.deepEqual(resolveDates({dateMode: 'days', days: 3, timeZone: 'America/New_York'}, new Date('2026-03-09T12:00:00Z')),
+    ['2026-03-07', '2026-03-08', '2026-03-09']);
+  assert.deepEqual(resolveDates({dateMode: 'days', days: 3, timeZone: 'Pacific/Kiritimati'}, new Date('2026-12-31T16:00:00Z')),
+    ['2026-12-30', '2026-12-31', '2027-01-01']);
+});
+
+test('malformed months, quarters, years, and unknown date modes fail before collecting', () => {
+  for (const targetMonth of ['', '2026-00', '2026-13', '2026-1', '0000-01', '10000-01', '2026-02-01', null, 202601]) {
+    assert.throws(() => resolveDates({dateMode: 'month', targetMonth, timeZone: 'UTC'}), value => value.code === 'INVALID_MONTH');
+  }
+  for (const quarterYear of [0, 10000, 2026.5, '2026', null, NaN]) {
+    assert.throws(() => resolveDates({dateMode: 'quarter', quarterYear, quarter: 1, timeZone: 'UTC'}), value => value.code === 'INVALID_QUARTER_YEAR');
+  }
+  for (const quarter of [0, 5, 1.5, '1', null, NaN]) {
+    assert.throws(() => resolveDates({dateMode: 'quarter', quarterYear: 2026, quarter, timeZone: 'UTC'}), value => value.code === 'INVALID_QUARTER');
+  }
+  for (const dateMode of [undefined, '', 'week', '__proto__']) {
+    assert.throws(() => resolveDates({dateMode, days: 7, timeZone: 'UTC'}), value => value.code === 'INVALID_DATE_MODE');
+  }
+});
+
+test('range endpoints reject rolled-over dates and malformed inputs separately', () => {
+  for (const invalid of ['2026-02-29', '2024-02-30', '2026-04-31', '2026-00-10', '0000-01-01', '', null, '2026-1-01']) {
+    assert.throws(() => resolveDates({dateMode: 'range', startDate: invalid, endDate: '2026-12-31', timeZone: 'UTC'}),
+      value => value.code === 'INVALID_RANGE_START');
+    assert.throws(() => resolveDates({dateMode: 'range', startDate: '2026-01-01', endDate: invalid, timeZone: 'UTC'}),
+      value => value.code === 'INVALID_RANGE_END');
+  }
+  for (const timeZone of ['Invalid/Zone', '', null, undefined]) {
+    assert.throws(() => resolveDates({dateMode: 'date', targetDate: '2026-01-01', timeZone}), value => value.code === 'INVALID_TIME_ZONE');
+  }
+});
+
+test('calendar construction retains four-digit years and does not apply Date.UTC century conversion', () => {
+  const dates = resolveDates({dateMode: 'month', targetMonth: '0099-12', timeZone: 'UTC'});
+  assert.equal(dates[0], '0099-12-01'); assert.equal(dates.at(-1), '0099-12-31');
+  const finalQuarter = resolveDates({dateMode: 'quarter', quarterYear: 9999, quarter: 4, timeZone: 'UTC'});
+  assert.equal(finalQuarter.at(-1), '9999-12-31');
+});
+
+test('export date labels compact consecutive dates without filling gaps or mutating inputs', () => {
+  assert.equal(dateRangeLabel([]), '');
+  assert.equal(dateRangeLabel(['2026-10-20']), '2026-10-20');
+  const dates = ['2027-01-01', '2026-12-31', '2027-01-04', '2026-12-31', '2027-01-03'];
+  const before = [...dates];
+  assert.equal(dateRangeLabel(dates), '2026-12-31 至 2027-01-01,2027-01-03 至 2027-01-04');
+  assert.deepEqual(dates, before);
+  assert.equal(dateRangeLabel(resolveDates({dateMode: 'quarter', quarterYear: 2026, quarter: 1, timeZone: 'UTC'})),
+    '2026-01-01 至 2026-03-31');
+});
+
+test('failed account rows preserve the full selected range with a concise export label', async () => {
+  const targetDates = resolveDates({dateMode: 'quarter', quarterYear: 2026, quarter: 4, timeZone: 'UTC'});
+  const rows = await runAccounts([account(2, 'youtube')], {...OPTIONS, targetDates}, {
+    youtube: async () => { throw new Error('Unknown failure'); },
+  });
+  assert.equal(rows[0].target_date, '2026-10-01 至 2026-12-31');
+});
+
 test('YouTube page cap fails instead of returning partial rows or NO_POST', async () => {
   for (const published of ['2026-08-29T12:00:00Z', '2026-08-30T12:00:00Z']) {
     const {request, calls} = api([
@@ -263,76 +367,9 @@ test('duration alone never confirms Shorts, and live status takes precedence', (
   assert.equal(videoType({}, {actualEndTime: '2026-08-29'}), '直播回放');
 });
 
-test('Instagram transport only permits the three read-only API path families', () => {
-  for (const path of [IG_PATH, '/api/v1/users/test.creator/usernameinfo/', '/api/v1/feed/user/123/?count=50&max_id=a%2Bb']) assert.equal(allowedInstagramPath(path), true);
-  for (const path of ['https://www.instagram.com/api/v1/users/web_profile_info/', '//evil.example/path', '/api/v1/media/123/like/', '/api/v1/users/test/usernameinfo/#fragment', '/direct/', '/api/v1/feed/user/not-an-id/']) assert.equal(allowedInstagramPath(path), false);
+test('Instagram tab selection accepts HTTPS profiles and excludes authentication pages', () => {
   assert.equal(usableInstagramTab('https://www.instagram.com/test/'), true);
   for (const url of ['https://fakeinstagram.com/', 'http://www.instagram.com/', 'https://www.instagram.com/accounts/login/', 'https://www.instagram.com/challenge/123/', 'https://www.instagram.com/checkpoint/', 'https://www.instagram.com/accounts/password/reset/']) assert.equal(usableInstagramTab(url), false);
-});
-
-test('in-page transport uses same-origin GET and never reads document.cookie', async t => {
-  globalValue(t, 'location', {origin: 'https://www.instagram.com', pathname: '/test/'});
-  globalValue(t, 'document', Object.defineProperty({}, 'cookie', {get() { throw new Error('Cookie access forbidden'); }}));
-  let calls = 0;
-  globalValue(t, 'fetch', async (url, options) => {
-    calls += 1;
-    assert.equal(url, `https://www.instagram.com${IG_PATH}`);
-    assert.equal(options.method, 'GET');
-    assert.equal(options.credentials, 'same-origin');
-    assert.equal(options.redirect, 'error');
-    assert.deepEqual(options.headers, {'x-ig-app-id': '936619743392459'});
-    assert.equal(options.body, undefined);
-    return {status: 200, text: async () => '{"status":"ok"}'};
-  });
-  assert.deepEqual(await instagramPageGet(IG_PATH), {status: 200, text: '{"status":"ok"}'});
-  assert.equal(calls, 1);
-});
-
-test('in-page transport refuses authentication pages and forbidden paths before fetch', async t => {
-  let calls = 0;
-  globalValue(t, 'fetch', async () => { calls += 1; throw new Error('must not request'); });
-  globalValue(t, 'location', {origin: 'https://www.instagram.com', pathname: '/challenge/123/'});
-  assert.equal((await instagramPageGet(IG_PATH)).code, 'AUTH');
-  globalThis.location.pathname = '/test/';
-  assert.equal((await instagramPageGet('/api/v1/media/123/like/')).code, 'BAD_URL');
-  assert.equal(calls, 0);
-});
-
-test('Instagram request runs only in selected tab and returns 429 without retrying', async t => {
-  let executes = 0;
-  globalValue(t, 'chrome', {
-    tabs: {get: async id => { assert.equal(id, 17); return {url: 'https://www.instagram.com/test/'}; }},
-    scripting: {executeScript: async options => {
-      executes += 1;
-      assert.deepEqual(options.target, {tabId: 17});
-      assert.equal(options.world, 'ISOLATED');
-      assert.equal(options.func, instagramPageGet);
-      assert.equal(options.args[0], IG_PATH);
-      return [{result: {status: 429, text: 'Rate limited'}}];
-    }},
-  });
-  const request = createInstagramRequest(17, {minDelay: 0, maxDelay: 0});
-  assert.equal((await request(IG_PATH)).status, 429);
-  assert.equal(executes, 1);
-});
-
-test('closed or login Instagram tabs prevent script injection', async t => {
-  let executes = 0;
-  globalValue(t, 'chrome', {tabs: {get: async () => ({url: 'https://www.instagram.com/accounts/login/'})},
-    scripting: {executeScript: async () => { executes += 1; }}});
-  await assert.rejects(createInstagramRequest(17)(IG_PATH), value => value.code === 'TAB');
-  assert.equal(executes, 0);
-});
-
-test('cancellation while resolving selected tab prevents subsequent Instagram request', async t => {
-  const controller = new AbortController();
-  let executes = 0;
-  globalValue(t, 'chrome', {
-    tabs: {get: async () => { controller.abort(); return {url: 'https://www.instagram.com/test/'}; }},
-    scripting: {executeScript: async () => { executes += 1; return [{result: {status: 200, text: '{}'}}]; }},
-  });
-  await assert.rejects(createInstagramRequest(17, {signal: controller.signal})(IG_PATH), value => value.code === 'CANCELLED');
-  assert.equal(executes, 0);
 });
 
 test('abort interrupts throttling delay', async () => {

@@ -11,7 +11,7 @@ const ERROR_NAMES = new Set(['Error', 'TypeError', 'RangeError', 'ReferenceError
   'TimeoutError', 'InvalidStateError', 'DataError', 'OperationError', 'NotFoundError', 'QuotaExceededError',
   'FetchError', 'RateLimitError', 'AuthError', 'BrowserError']);
 const STACK_MODULES = new Set(['app.mjs', 'bootstrap.js', 'background.mjs', 'lib/diagnostics.mjs',
-  'lib/diagnostic-store.mjs', 'lib/errors.mjs', 'lib/transport.mjs', 'lib/jobs.mjs', 'lib/instagram.mjs',
+  'lib/diagnostic-store.mjs', 'lib/errors.mjs', 'lib/transport.mjs', 'lib/jobs.mjs',
   'lib/youtube.mjs', 'lib/workbook.mjs', 'lib/instagram-page.mjs', 'lib/instagram-page-reader.mjs',
   'lib/instagram-page-snapshot.mjs', 'lib/instagram-page-observer.mjs', 'vendor/xlsx.full.min.js']);
 const CONTAINERS = new Set(['error', 'errors', 'cause', 'details', 'options', 'settings', 'counts', 'summary', 'meta']);
@@ -22,6 +22,7 @@ const ALLOWED_KEYS = new Set([
   'count', 'warningcount', 'postcount', 'index', 'total', 'pending', 'pendingcount', 'completed', 'completedcount', 'accountcount',
   'okaccounts', 'nopostaccounts', 'failedaccounts', 'completedaccounts', 'posts', 'pages', 'page', 'pagecount',
   'maxpages', 'maxposts', 'mindelay', 'maxdelay', 'days', 'datemode', 'targetdate', 'targetdates', 'timezone',
+  'targetmonth', 'quarteryear', 'quarter', 'startdate', 'enddate',
   'inputformat', 'fileextension', 'filesize', 'bytes', 'size', 'transport', 'method', 'tabid', 'frameid',
   'cancelled', 'aborted', 'hasresults', 'reason', 'component', 'action', 'checkpoint', 'online', 'state',
   'runid', 'entryid', 'diagnosticid', 'requestid', 'correlationid', 'version', 'browser',

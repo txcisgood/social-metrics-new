@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {describeError} from '../edge-extension/lib/errors.mjs';
+import {describeError} from '../extension/lib/errors.mjs';
 
 const coded = (code, message = '') => Object.assign(new Error(message), {code});
 const visible = description => [description.title, description.message, description.action].join('\n');
@@ -198,6 +198,28 @@ test('dates, timezone and account-count validations provide fixed instructions',
     const result = describeError(new Error(message));
     assert.equal(result.code, 'INVALID_INPUT');
     assert.ok(result.action.length > 5);
+  }
+});
+
+test('each date-selection validation explains its own field or limit without leaking raw input', () => {
+  const cases = [
+    ['INVALID_TIME_ZONE', /时区/, /重新选择时区/],
+    ['INVALID_DAYS', /1 至 366/, /最近天数/],
+    ['INVALID_DATE', /有效的日历日期/, /目标日期/],
+    ['INVALID_MONTH', /1 至 12/, /年份和月份/],
+    ['INVALID_QUARTER_YEAR', /1 至 9999/, /年份/],
+    ['INVALID_QUARTER', /季度/, /第一、第二、第三或第四/],
+    ['INVALID_RANGE_START', /开始日期/, /开始日期/],
+    ['INVALID_RANGE_END', /结束日期/, /结束日期/],
+    ['DATE_RANGE_REVERSED', /开始日期晚于结束日期/, /不晚于/],
+    ['DATE_RANGE_TOO_LONG', /366 天.*开始日期和结束日期都计入/, /分批/],
+    ['INVALID_DATE_MODE', /日期范围类型/, /月份、季度或自定义/],
+  ];
+  for (const [code, message, action] of cases) {
+    const info = describeError(coded(code, 'PRIVATE_INPUT <script>failed to fetch</script>'));
+    assert.equal(info.code, 'INVALID_INPUT');
+    assert.match(info.message, message); assert.match(info.action, action);
+    assert.doesNotMatch(visible(info), /PRIVATE_INPUT|<script>|fetch/);
   }
 });
 

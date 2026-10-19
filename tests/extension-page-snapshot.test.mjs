@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import {instagramPageSnapshot} from '../edge-extension/lib/instagram-page-snapshot.mjs';
+import {instagramPageSnapshot} from '../extension/lib/instagram-page-snapshot.mjs';
 
 // Small DOM fixtures for the actual selector/ancestor/text contract used by the
 // serializable function. No external DOM package or browser/network is required.

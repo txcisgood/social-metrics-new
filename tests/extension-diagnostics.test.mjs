@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {createDiagnostics} from '../edge-extension/lib/diagnostics.mjs';
+import {createDiagnostics} from '../extension/lib/diagnostics.mjs';
 const OMITTED_ERROR = '原始错误文本已省略，请结合错误代码与堆栈排查';
 
 test('each run and each entry have distinct IDs and a versioned detached snapshot', () => {
@@ -51,7 +51,7 @@ test('Errors retain type, code and known module positions while omitting raw mes
   const cause = new Error('Network unavailable');
   const error = new TypeError('Cannot read properties of undefined', {cause});
   error.code = 'INVALID_DATA';
-  error.stack = 'TypeError: Cannot read properties of undefined\n at parse (chrome-extension://abcdefghijkl/lib/instagram.mjs:51:9)\n at file:///Users/real-user/private-project/edge-extension/app.mjs:88:3';
+  error.stack = 'TypeError: Cannot read properties of undefined\n at parse (chrome-extension://abcdefghijkl/lib/instagram-page.mjs:51:9)\n at file:///Users/real-user/private-project/extension/app.mjs:88:3';
   const originalStack = error.stack;
   diagnostics.record('error', 'parse.failed', {error});
   const actual = diagnostics.snapshot().entries[0].details.error;
@@ -59,7 +59,7 @@ test('Errors retain type, code and known module positions while omitting raw mes
   assert.equal(actual.message, OMITTED_ERROR);
   assert.equal(actual.code, 'INVALID_DATA');
   assert.equal(actual.cause.message, OMITTED_ERROR);
-  assert.match(actual.stack, /lib\/instagram\.mjs:51:9/);
+  assert.match(actual.stack, /lib\/instagram-page\.mjs:51:9/);
   assert.match(actual.stack, /app\.mjs:88:3/);
   assert.doesNotMatch(actual.stack, /abcdefghijkl|real-user|private-project/);
   assert.equal(error.stack, originalStack);
@@ -198,14 +198,14 @@ test('unknown error text, function names and stack headers cannot reveal names o
   const diagnostics = createDiagnostics();
   const error = new Error('Alice Example posted Confidential caption without a field label');
   error.stack = 'Error: Alice Example posted Confidential caption\n'
-    + ' at privateDynamicFunction_Alice (chrome-extension://extension-id/lib/instagram.mjs:12:4)\n'
+    + ' at privateDynamicFunction_Alice (chrome-extension://extension-id/lib/instagram-page.mjs:12:4)\n'
     + ' at captionFromPrivatePost (chrome-extension://extension-id/private-custom-file.mjs:9:1)\n'
     + ' at failedCall (file:///Users/alice/private/app.mjs:55:3)\n'
     + ' at maliciousName (chrome-extension://extension-id/bootstrap.js:9:1)';
   diagnostics.record('error', 'unhandled.error', {error, code: 'UNKNOWN_ERROR', status: 500});
   const details = diagnostics.snapshot().entries[0].details;
   assert.equal(details.error.message, OMITTED_ERROR);
-  assert.equal(details.error.stack, 'at lib/instagram.mjs:12:4\nat app.mjs:55:3\nat bootstrap.js:9:1');
+  assert.equal(details.error.stack, 'at lib/instagram-page.mjs:12:4\nat app.mjs:55:3\nat bootstrap.js:9:1');
   assert.equal(details.code, 'UNKNOWN_ERROR');
   assert.equal(details.status, 500);
   assert.doesNotMatch(diagnostics.text(), /Alice|Confidential caption|privateDynamic|captionFrom|private-custom|extension-id|maliciousName/);

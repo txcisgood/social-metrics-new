@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {createDiagnostics} from '../edge-extension/lib/diagnostics.mjs';
-import {createInstagramRequest, createYouTubeRequest} from '../edge-extension/lib/transport.mjs';
-import {runAccounts} from '../edge-extension/lib/jobs.mjs';
+import {createDiagnostics} from '../extension/lib/diagnostics.mjs';
+import {createYouTubeRequest} from '../extension/lib/transport.mjs';
+import {runAccounts} from '../extension/lib/jobs.mjs';
 
 const OPTIONS = {targetDates: ['2026-10-19'], timeZone: 'Europe/London', maxPages: 3};
 const SECRET = 'integration-private-key-91/+=&';
@@ -45,7 +45,7 @@ function assertMetadataIsNarrow(events) {
       assert.equal(Object.hasOwn(details, key), false, `${key} must not enter request metadata`);
     }
     assert.equal(details.stage, 'request');
-    assert.ok(['instagram', 'youtube'].includes(details.platform));
+    assert.equal(details.platform, 'youtube');
     assert.match(details.endpoint, /^[A-Za-z_]+$/);
   }
 }
@@ -63,24 +63,6 @@ function assertCompleted(events, expectedStatuses) {
     assert.ok(Number.isFinite(details.durationMs) && details.durationMs >= 0);
   });
 }
-
-test('Instagram diagnostics correlate endpoint, status and duration without paths, usernames or bodies', async t => {
-  const log = recorder();
-  const body = JSON.stringify({caption: PRIVATE_SENTINEL, api_key: SECRET});
-  let requestIndex = 0;
-  globalValue(t, 'chrome', {
-    tabs: {get: async () => ({url: 'https://www.instagram.com/'})},
-    scripting: {executeScript: async () => [{result: {status: ++requestIndex === 3 ? 429 : 200, text: body}}]},
-  });
-  const request = createInstagramRequest(10, {minDelay: 0, maxDelay: 0, onDiagnostic: log.onDiagnostic});
-  assert.equal((await request(`/api/v1/users/web_profile_info/?username=${PRIVATE_SENTINEL}`)).text, body);
-  await request(`/api/v1/users/${PRIVATE_SENTINEL}/usernameinfo/`);
-  await request(`/api/v1/feed/user/123456789/?count=50&max_id=${encodeURIComponent(SECRET)}`);
-  assertCompleted(log.events, [200, 200, 429]);
-  assert.deepEqual(log.events.filter(event => event.event === 'request.started').map(event => event.details.endpoint), ['web_profile_info', 'usernameinfo', 'feed']);
-  assertMetadataIsNarrow(log.events);
-  assert.doesNotMatch(log.diagnostics.text(), /PRIVATE_ACCOUNT_OR_POST_SENTINEL|integration-private-key|123456789|caption|https:\/\//);
-});
 
 test('YouTube diagnostics correlate HTTP status with completion ID and never log request parameters or data', async t => {
   const log = recorder();
@@ -119,11 +101,6 @@ test('native transport errors are sanitized by the actual diagnostics boundary b
   nativeError.stack = `${nativeError.message}\n at ${PRIVATE_SENTINEL} (chrome-extension://extension-id/lib/transport.mjs:75:3)`;
   globalValue(t, 'fetch', async () => { throw nativeError; });
   await assert.rejects(createYouTubeRequest(SECRET, {onDiagnostic: log.onDiagnostic})('channels', {forHandle: PRIVATE_SENTINEL}));
-  globalValue(t, 'chrome', {
-    tabs: {get: async () => ({url: 'https://www.instagram.com/'})},
-    scripting: {executeScript: async () => { throw nativeError; }},
-  });
-  await assert.rejects(createInstagramRequest(10, {onDiagnostic: log.onDiagnostic})('/api/v1/users/web_profile_info/?username=example'));
   assert.ok(log.events.some(event => event.details.error === nativeError), 'the internal callback may receive Error objects; the diagnostics module is the sanitization boundary');
   assertMetadataIsNarrow(log.events);
   const exported = log.diagnostics.text();
@@ -131,23 +108,18 @@ test('native transport errors are sanitized by the actual diagnostics boundary b
   assert.match(exported, /transport\.mjs:75:3/);
 });
 
-test('throwing diagnostic callbacks cannot break either successful transport', async t => {
+test('throwing diagnostic callbacks cannot break successful YouTube transport', async t => {
   let callbackCalls = 0;
   const onDiagnostic = () => { callbackCalls++; throw new Error('diagnostic-only failure'); };
-  globalValue(t, 'chrome', {
-    tabs: {get: async () => ({url: 'https://www.instagram.com/'})},
-    scripting: {executeScript: async () => [{result: {status: 200, text: '{}'}}]},
-  });
   globalValue(t, 'fetch', async () => ({status: 200, ok: true, json: async () => ({items: []})}));
-  assert.deepEqual(await createInstagramRequest(10, {onDiagnostic})('/api/v1/users/web_profile_info/?username=example'), {status: 200, text: '{}'});
   assert.deepEqual(await createYouTubeRequest(SECRET, {onDiagnostic})('channels', {}), {items: []});
-  assert.ok(callbackCalls >= 4);
+  assert.ok(callbackCalls >= 3);
 });
 
 test('failed rows link to the recorded diagnostic without exposing raw exception text in user fields', async () => {
   const diagnostics = createDiagnostics({secrets: [SECRET]});
   const raw = new TypeError(`Unexpected ${PRIVATE_SENTINEL} key=${SECRET}`);
-  raw.stack = `${raw.message}\n at unsafeName (chrome-extension://extension-id/lib/instagram.mjs:41:2)`;
+  raw.stack = `${raw.message}\n at unsafeName (chrome-extension://extension-id/lib/instagram-page.mjs:41:2)`;
   let recordedId;
   const [row] = await runAccounts([account(2, 'instagram')], OPTIONS, {instagram: async () => { throw raw; }}, {
     onError(error, source) {

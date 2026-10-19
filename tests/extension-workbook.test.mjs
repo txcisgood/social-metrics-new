@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import test from "node:test";
-import { createResultsWorkbook, createAccountsTemplate, accountTemplateLabel, loadAccounts, readWorkbook, summarize } from "../edge-extension/lib/workbook.mjs";
-import { failedRow } from "../edge-extension/lib/jobs.mjs";
+import { createResultsWorkbook, createAccountsTemplate, accountTemplateLabel, loadAccounts, readWorkbook, summarize } from "../extension/lib/workbook.mjs";
+import { failedRow } from "../extension/lib/jobs.mjs";
 
 const require = createRequire(import.meta.url);
-globalThis.XLSX = require("../edge-extension/vendor/xlsx.full.min.js");
+globalThis.XLSX = require("../extension/vendor/xlsx.full.min.js");
 const XLSX = globalThis.XLSX;
 
 function workbook(rows) {

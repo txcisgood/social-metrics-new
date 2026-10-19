@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {createDiagnostics} from '../edge-extension/lib/diagnostics.mjs';
-import {persistDiagnostics, latestDiagnostics, clearStoredDiagnostics} from '../edge-extension/lib/diagnostic-store.mjs';
+import {createDiagnostics} from '../extension/lib/diagnostics.mjs';
+import {persistDiagnostics, latestDiagnostics, clearStoredDiagnostics} from '../extension/lib/diagnostic-store.mjs';
 
 const PREFIX = 'metrics.diagnostics.';
 

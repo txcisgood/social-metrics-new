@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import {installInstagramPageObserver, readInstagramPageObserver} from '../edge-extension/lib/instagram-page-observer.mjs';
+import {installInstagramPageObserver, readInstagramPageObserver} from '../extension/lib/instagram-page-observer.mjs';
 
 const scope = {expectedUsername: 'creator'};
 const item = (code = 'A', extra = {}) => ({code, user: {username: 'creator'}, taken_at: 1792400000,

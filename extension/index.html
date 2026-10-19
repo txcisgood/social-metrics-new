@@ -80,6 +80,9 @@
               <select id="dateMode">
                 <option value="days" selected>最近几天（含今天）</option>
                 <option value="date">指定一天</option>
+                <option value="month">按月</option>
+                <option value="quarter">按季度</option>
+                <option value="range">自定义起止日期</option>
               </select>
             </div>
             <div id="daysField" class="field">
@@ -90,6 +93,36 @@
               <label for="targetDate">目标日期</label>
               <input id="targetDate" type="date">
             </div>
+            <div id="monthField" class="field" hidden>
+              <label for="targetMonth">月份</label>
+              <input id="targetMonth" type="month">
+            </div>
+            <div id="quarterField" hidden>
+              <div class="field">
+                <label for="quarterYear">年份</label>
+                <input id="quarterYear" type="number" min="1" max="9999" step="1" inputmode="numeric">
+              </div>
+              <div class="field">
+                <label for="quarter">季度</label>
+                <select id="quarter">
+                  <option value="1">第一季度 · 1 月 1 日至 3 月 31 日</option>
+                  <option value="2">第二季度 · 4 月 1 日至 6 月 30 日</option>
+                  <option value="3">第三季度 · 7 月 1 日至 9 月 30 日</option>
+                  <option value="4">第四季度 · 10 月 1 日至 12 月 31 日</option>
+                </select>
+              </div>
+            </div>
+            <div id="rangeField" hidden>
+              <div class="field">
+                <label for="startDate">开始日期（含当天）</label>
+                <input id="startDate" type="date">
+              </div>
+              <div class="field">
+                <label for="endDate">结束日期（含当天）</label>
+                <input id="endDate" type="date">
+              </div>
+              <p class="field-help">可跨月、跨年，每次最多选择 366 天。</p>
+            </div>
             <div class="field">
               <label for="timeZone">日期判定时区</label>
               <select id="timeZone">
@@ -99,6 +132,10 @@
                 <option value="UTC">协调世界时 · UTC</option>
               </select>
               <p class="field-help">按创作者所在时区判断帖子属于哪一天。</p>
+            </div>
+            <div class="date-preview" aria-live="polite" aria-atomic="true">
+              <p id="datePreview"></p>
+              <p id="datePreviewHint" class="field-help" hidden></p>
             </div>
           </section>
 
