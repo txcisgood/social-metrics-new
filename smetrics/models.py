@@ -17,7 +17,7 @@ class AccountRow:
     row_no: int
     name: str
     url: str
-    platform: str                 # 归一化后的平台标识：youtube / instagram / facebook
+    platform: str                 # 归一化后的平台标识：youtube / instagram
     raw_platform: str = ""        # 表格里原始写的平台名，用于提示不一致
     note: str = ""                # 归一化阶段产生的提示
 

@@ -1,9 +1,7 @@
 {
-  "youtube_api_key": "填你的 YouTube API Key（AIzaSy...）",
+  "youtube_api_key": "",
   "timezone": "Europe/London",
-  "instagram_sessionid": "可留空。只有年龄限制的账号才需要；填了还能拿到兜底账号的精确粉丝数",
+  "instagram_sessionid": "",
   "ig_min_delay": 8,
-  "ig_max_delay": 12,
-  "fb_min_delay": 5,
-  "fb_max_delay": 10
+  "ig_max_delay": 12
 }

@@ -1,6 +1,7 @@
 .venv/
 config.json
 results/
+outputs/
 .cache/
 __pycache__/
 *.pyc

@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://www.googleapis.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+    <meta name="color-scheme" content="light">
+    <title>社媒采集 · Social Metrics</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="bootstrap.js" defer></script>
+    <script src="vendor/xlsx.full.min.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#workspace">跳到采集结果</a>
+    <div class="app-shell">
+      <header class="app-header">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+          <div class="brand-copy">
+            <span class="brand-name">Social Metrics</span>
+            <span class="brand-description">社媒采集</span>
+          </div>
+        </div>
+        <p class="header-note"><span class="local-indicator" aria-hidden="true"></span>文件在本机解析</p>
+      </header>
+
+      <div class="app-layout">
+        <aside class="settings-panel" aria-labelledby="settingsTitle">
+          <div class="panel-heading">
+            <h1 id="settingsTitle">开始一次采集</h1>
+            <p>导入账号，选择日期，汇总发布数据。</p>
+          </div>
+
+          <section class="settings-section" aria-labelledby="inputTitle">
+            <div class="section-heading">
+              <h2 id="inputTitle">账号文件</h2>
+              <button id="sampleButton" class="text-button" type="button">使用示例</button>
+            </div>
+            <label class="file-picker" for="inputFile">
+              <span class="file-picker-title">选择账号表格</span>
+              <span class="file-picker-description">Excel、CSV 或 TSV</span>
+              <input id="inputFile" type="file" accept=".xlsx,.csv,.tsv" aria-describedby="fileInfo">
+            </label>
+            <p id="fileInfo" class="field-help" aria-live="polite">首次使用，可先选择平台并下载下方模板。</p>
+            <div id="sheetField" class="field" hidden>
+              <label for="sheetSelect">工作表</label>
+              <select id="sheetSelect" aria-label="选择工作表"></select>
+            </div>
+            <div class="field">
+              <label for="platformSelect">采集平台</label>
+              <select id="platformSelect">
+                <option value="instagram" selected>Instagram</option>
+                <option value="youtube">YouTube</option>
+                <option value="all">Instagram 和 YouTube</option>
+              </select>
+            </div>
+            <div class="template-download">
+              <button id="downloadTemplate" class="button button-secondary" type="button" aria-describedby="templateHelp">下载 Instagram 模板</button>
+              <p id="templateHelp" class="field-help">模板含填写说明和链接示例。填好「账号清单」后，再从上方导入。</p>
+              <p id="templateFeedback" class="field-help" role="status" aria-live="polite"></p>
+            </div>
+          </section>
+
+          <section id="instagramSection" class="settings-section" aria-labelledby="instagramTitle">
+            <div class="section-heading">
+              <h2 id="instagramTitle">Instagram 登录页面</h2>
+              <button id="refreshTabs" class="text-button" type="button">刷新标签页</button>
+            </div>
+            <label class="sr-only" for="tabSelect">已登录的 Instagram 标签页</label>
+            <select id="tabSelect" aria-describedby="tabStatus">
+              <option value="">请选择 Instagram 标签页</option>
+            </select>
+            <p id="tabStatus" class="field-help" role="status">先在当前浏览器中打开 Instagram 并登录，保持标签页开启。</p>
+          </section>
+
+          <section class="settings-section" aria-labelledby="dateTitle">
+            <h2 id="dateTitle">采集日期</h2>
+            <div class="field">
+              <label for="dateMode">日期范围</label>
+              <select id="dateMode">
+                <option value="days" selected>最近几天（含今天）</option>
+                <option value="date">指定一天</option>
+              </select>
+            </div>
+            <div id="daysField" class="field">
+              <label for="days">天数</label>
+              <input id="days" type="number" value="7" min="1" max="366" step="1" inputmode="numeric">
+            </div>
+            <div id="dateField" class="field" hidden>
+              <label for="targetDate">目标日期</label>
+              <input id="targetDate" type="date">
+            </div>
+            <div class="field">
+              <label for="timeZone">日期判定时区</label>
+              <select id="timeZone">
+                <option value="Europe/London" selected>英国 · Europe/London</option>
+                <option value="Asia/Shanghai">中国 · Asia/Shanghai</option>
+                <option value="America/Los_Angeles">美国西部 · America/Los_Angeles</option>
+                <option value="UTC">协调世界时 · UTC</option>
+              </select>
+              <p class="field-help">按创作者所在时区判断帖子属于哪一天。</p>
+            </div>
+          </section>
+
+          <details class="settings-details">
+            <summary>高级设置</summary>
+            <div class="details-content">
+              <div id="scanModeField" class="field">
+                <label for="scanMode">Instagram 采集方式</label>
+                <select id="scanMode"><option value="recent" selected>按日期快速检查</option><option value="complete">继续检查更多内容</option></select>
+                <p id="scanModeHelp" class="field-help">优先读取目标日期附近的帖子。更早的内容会尽快跳过，未能确认的范围会标记待核对。</p>
+              </div>
+              <div class="field">
+                <label for="maxPages">每个账号最多读取批次 / 页数</label>
+                <input id="maxPages" type="number" value="5" min="1" max="50" step="1" inputmode="numeric">
+                <p class="field-help">Instagram 包含首次主页和向下滚动；YouTube 按分页计数。未查全会保留已读结果并标记待核对。</p>
+              </div>
+              <div class="field">
+                <label for="maxPosts">Instagram 每账号最多打开帖子数</label>
+                <input id="maxPosts" type="number" value="40" min="1" max="500" step="1" inputmode="numeric">
+                <p class="field-help">打开详情补充发布日期和指标。数量越大耗时越长；到达上限不等于没有更多帖子。</p>
+              </div>
+              <div class="field">
+                <span class="field-label" id="delayLabel">Instagram 页面操作间隔（秒）</span>
+                <div class="range-fields" role="group" aria-labelledby="delayLabel">
+                  <div><label for="minDelay">最短</label><input id="minDelay" type="number" value="3" min="3" max="120" step="1" inputmode="numeric"></div>
+                  <span class="range-separator" aria-hidden="true">至</span>
+                  <div><label for="maxDelay">最长</label><input id="maxDelay" type="number" value="5" min="3" max="120" step="1" inputmode="numeric"></div>
+                </div>
+                <p class="field-help">页面提示限制访问或要求登录时，会停止 Instagram 本轮采集。</p>
+              </div>
+            </div>
+          </details>
+
+          <details id="youtubeSection" class="settings-details">
+            <summary>YouTube API 密钥</summary>
+            <div class="details-content">
+              <div class="field">
+                <label for="youtubeKey">YouTube Data API Key</label>
+                <input id="youtubeKey" type="password" autocomplete="off" spellcheck="false" placeholder="仅采集 YouTube 时填写" aria-describedby="youtubeKeyHelp">
+                <p id="youtubeKeyHelp" class="field-help">密钥仅供本次页面使用，不写入导出文件。</p>
+              </div>
+            </div>
+          </details>
+
+          <div class="run-controls">
+            <div class="run-buttons">
+              <button id="startButton" class="button button-primary" type="button" disabled>开始采集</button>
+              <button id="stopButton" class="button button-stop" type="button" disabled>停止</button>
+            </div>
+            <p class="field-help">开始后会自动打开专用采集标签页。请保持工作页开启，采集期间不要关闭或切换专用标签页的地址。</p>
+          </div>
+        </aside>
+
+        <main id="workspace" class="workspace" tabindex="-1">
+          <section class="workspace-top" aria-labelledby="resultsTitle">
+            <div>
+              <p class="workspace-context">采集工作台</p>
+              <h2 id="resultsTitle">发布内容与互动数据</h2>
+              <p class="workspace-description">查看采集进度，完成后直接下载 Excel。已取得的帖子与待核对项都会保留。</p>
+            </div>
+            <span id="statusText" class="status-label" role="status">准备就绪</span>
+          </section>
+
+          <section class="progress-section" aria-label="采集进度">
+            <div class="progress-heading">
+              <p id="progressText" aria-live="polite">等待导入账号</p>
+              <p class="elapsed-counter">已用时间 <span id="elapsedText">00:00</span></p>
+            </div>
+            <p id="accountProgress" class="account-progress">当前账号：—</p>
+            <p id="scanProgress" class="scan-progress">主页 0 批 · 发现 0 条 · 已开详情 0 条 · 目标日期帖子 0 条</p>
+            <progress id="progressBar" value="0" max="100" aria-label="采集完成进度"></progress>
+            <p class="operation-counters">Instagram 页面操作 <span id="igOperationCount">0</span> 次 <span aria-hidden="true">·</span> YouTube API 请求 <span id="ytRequestCount">0</span> 次</p>
+            <p id="legacyCounter" class="operation-counters" hidden>上次记录合计 <span id="requestCount">0</span> 次操作（旧记录未区分平台）</p>
+            <p id="summaryText" class="summary-text" aria-live="polite">尚未开始采集</p>
+          </section>
+
+          <ul id="warnings" class="warnings" aria-live="polite" aria-label="需要注意的事项"></ul>
+          <section id="problemPanel" class="problem-panel" role="alert" hidden>
+            <div class="problem-heading"><h3 id="problemTitle"></h3><button id="dismissProblem" class="text-button" type="button">收起提示</button></div>
+            <p id="problemMessage"></p>
+            <p id="problemAction" class="problem-action"></p>
+            <p id="problemCode" class="problem-code"></p>
+          </section>
+
+          <section class="results-section export-panel" aria-labelledby="exportTitle">
+            <div class="results-toolbar">
+              <div>
+                <h3 id="exportTitle">导出采集结果</h3>
+                <p id="exportStatus" role="status">从一个账号开始。采集完成或停止后，可下载已取得的结果。</p>
+              </div>
+            </div>
+            <div class="export-actions" aria-label="结果操作">
+              <button id="exportXlsx" class="button button-primary button-export" type="button" disabled>下载 Excel 结果</button>
+              <button id="exportJson" class="button button-quiet" type="button" disabled>导出 JSON</button>
+              <button id="clearButton" class="button button-quiet" type="button">清空结果</button>
+            </div>
+            <p class="export-note">帖子和指标写入「采集结果」，未查全或未采集的账号写入「待人工核对」。点击后下载，不会自动下载或修改原始账号表。</p>
+          </section>
+
+          <section class="activity-section" aria-labelledby="activityTitle">
+            <div class="activity-heading"><h3 id="activityTitle">运行记录与问题反馈</h3><span>遇到问题时，把诊断日志发给开发者</span></div>
+            <div class="diagnostic-toolbar">
+              <button id="copyLogs" class="button button-secondary" type="button">复制诊断日志</button>
+              <button id="downloadLogs" class="button button-quiet" type="button">下载诊断日志</button>
+              <button id="clearLogs" class="button button-quiet" type="button">清空诊断日志</button>
+              <span id="logFeedback" role="status" aria-live="polite"></span>
+            </div>
+            <p class="diagnostic-help">诊断日志保存在本机，包含版本、操作步骤和错误详情；不记录密钥、Cookie、帖子正文或账号表内容。复制前可以展开查看。</p>
+            <ol id="logList" class="log-list" role="log" aria-live="polite" aria-relevant="additions text"><li class="log-placeholder">采集开始后，运行记录会显示在这里。</li></ol>
+            <details id="diagnosticsDetails" class="diagnostics-details">
+              <summary>查看可反馈的诊断日志</summary>
+              <label class="sr-only" for="diagnosticText">诊断日志，可手动全选复制</label>
+              <textarea id="diagnosticText" readonly spellcheck="false"></textarea>
+            </details>
+          </section>
+          <footer class="workspace-footer">Instagram 的可用数据取决于登录权限和平台限制。未能确认的数据会标为待核对。</footer>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>

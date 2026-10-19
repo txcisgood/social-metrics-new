@@ -1,4 +1,4 @@
-"""平台采集器基类。新增 Facebook / Instagram 时继承它即可，主流程不用改。"""
+"""平台采集器基类。新增 新平台 时继承它即可，主流程不用改。"""
 
 from ..models import AccountRow, FetchOptions, PostMetric
 

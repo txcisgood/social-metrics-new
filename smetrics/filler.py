@@ -1,7 +1,7 @@
 """把采集结果回填进用户原始表格的对应列。
 
-原则：绝不改用户的原文件。读原表 → 复制一份 → 只往空白的目标列写 → 存到输出目录。
-原表的格式、公式、其他 sheet 全部保留。
+原则：绝不改用户的原文件。复制原表后，刷新本次采集行的目标列。
+未采集行和目标列之外的内容保持原样。
 """
 
 import os
@@ -39,12 +39,13 @@ def fill_back(source_path: str, results: list, out_dir: str,
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     base = os.path.splitext(os.path.basename(source_path))[0]
     label = _date_label(target_dates)
-    out_path = os.path.join(out_dir, f"{base}-已回填-{label}-{stamp}.xlsx")
+    extension = ".xlsm" if source_path.lower().endswith(".xlsm") else ".xlsx"
+    out_path = os.path.join(out_dir, f"{base}-已回填-{label}-{stamp}{extension}")
 
     # 先物理复制，保证原文件一个字节都不动
     shutil.copy2(source_path, out_path)
 
-    wb = load_workbook(out_path)
+    wb = load_workbook(out_path, keep_vba=extension == ".xlsm")
     ws = wb.active
     col_idx, header_row, notes = _locate_columns(ws)
 
@@ -62,29 +63,39 @@ def fill_back(source_path: str, results: list, out_dir: str,
         if row_no <= header_row:
             continue
         ok_rows = [r for r in rows if r.status == STATUS_OK]
+        failed_rows = [r for r in rows if r.status == STATUS_FAILED]
         first = rows[0]
 
+        # A filled input may contain last run's metrics. Never leave those next to
+        # this run's NO_POST/FAILED status or stale links next to new post text.
+        for field in TARGET_COLUMNS:
+            if field != "platform":
+                _write(ws, row_no, col_idx, field, None)
         _write(ws, row_no, col_idx, "platform", _platform_label(first.platform))
         if first.follower_count not in ("", None):
             _write(ws, row_no, col_idx, "follower", first.follower_count)
 
         if ok_rows:
             filled += 1
-            _write(ws, row_no, col_idx, "post_text", _join(r.post_title for r in ok_rows))
+            title = _join(r.post_title for r in ok_rows)
+            if failed_rows:
+                failed += 1
+                title += "\n（部分内容抓取失败，详见独立结果文件的待人工核对表）"
+            _write(ws, row_no, col_idx, "post_text", title)
             _write(ws, row_no, col_idx, "post_date", _join(r.published_local for r in ok_rows))
             _write(ws, row_no, col_idx, "post_link", _join(r.post_url for r in ok_rows))
             _write(ws, row_no, col_idx, "views", _join_num(r.view_count for r in ok_rows))
             _write(ws, row_no, col_idx, "likes", _join_num(r.like_count for r in ok_rows))
             _write(ws, row_no, col_idx, "comments", _join_num(r.comment_count for r in ok_rows))
-            _tint(ws, row_no, col_idx, OK_FILL)
-        elif any(r.status == STATUS_FAILED for r in rows):
+            _tint(ws, row_no, col_idx, FAIL_FILL if failed_rows else OK_FILL)
+        elif failed_rows:
             failed += 1
             err = next(r.error for r in rows if r.status == STATUS_FAILED)
             # 单元格里只放简短原因，完整指引在「待人工核对」sheet，否则表格没法看
             brief = err.split("。")[0].split("解决办法")[0].strip()
             if len(brief) > 60:
                 brief = brief[:60] + "…"
-            _write(ws, row_no, col_idx, "post_text", f"（抓取失败：{brief} 详见待人工核对表）")
+            _write(ws, row_no, col_idx, "post_text", f"（抓取失败：{brief} 详见独立结果文件的待人工核对表）")
             _write(ws, row_no, col_idx, "post_date", label)
             _tint(ws, row_no, col_idx, FAIL_FILL)
         else:
@@ -95,7 +106,7 @@ def fill_back(source_path: str, results: list, out_dir: str,
             _write(ws, row_no, col_idx, "post_date", label)
             _tint(ws, row_no, col_idx, NONE_FILL)
 
-    # 本次没跑到的行（比如 IG/FB）留空不动，只在备注 sheet 里说明，避免覆盖手工填的内容
+    # 本次没跑到的行（比如 未选择的平台）留空不动，只在备注 sheet 里说明，避免覆盖手工填的内容
     _append_run_note(wb, target_dates, filled, no_post, failed, touched_rows, by_row)
 
     wb.save(out_path)
@@ -103,7 +114,7 @@ def fill_back(source_path: str, results: list, out_dir: str,
 
     notes.append(f"回填完成：当天有发布 {filled} 行，无发布 {no_post} 行，失败 {failed} 行")
     covered = {r.platform for r in results}
-    pending = [_platform_label(p) for p in ("instagram", "facebook") if p not in covered]
+    pending = [_platform_label(p) for p in ("youtube", "instagram") if p not in covered]
     if pending:
         notes.append(f"本次未采集的平台（{' / '.join(pending)}）整行留空未改动")
     return out_path, notes
@@ -141,6 +152,10 @@ def _write(ws, row_no: int, col_idx: dict, field: str, value):
         return
     cell = ws.cell(row=row_no, column=col)
     cell.value = value
+    if isinstance(value, str):
+        cell.data_type = "s"  # Social captions beginning with '=' are text, never formulas.
+    if field == "post_link":
+        cell.hyperlink = None
     if isinstance(value, str) and "\n" in value:
         cell.alignment = Alignment(wrap_text=True, vertical="top")
     if field == "post_link" and isinstance(value, str) and value.startswith("http") and "\n" not in value:
@@ -167,7 +182,7 @@ def _join_num(values) -> object:
 
 
 def _platform_label(p: str) -> str:
-    return {"youtube": "YouTube", "instagram": "Instagram", "facebook": "Facebook"}.get(p, p)
+    return {"youtube": "YouTube", "instagram": "Instagram"}.get(p, p)
 
 
 def _norm(s) -> str:

@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 
 from .base import BaseFetcher
 from ..http import HttpClient, FetchError
-from ..models import PostMetric, STATUS_OK, STATUS_NO_POST, date_label
+from ..models import PostMetric, STATUS_OK, STATUS_NO_POST, STATUS_FAILED, date_label
 
 API = "https://www.googleapis.com/youtube/v3"
 CHANNEL_ID_RE = re.compile(r"UC[A-Za-z0-9_\-]{22}")
@@ -80,6 +80,11 @@ class YouTubeFetcher(BaseFetcher):
         stats = self._video_stats([h["video_id"] for h in hits])
         results = []
         for h in hits:
+            if h["video_id"] not in stats:
+                results.append(PostMetric(status=STATUS_FAILED,
+                    post_url=f"https://www.youtube.com/watch?v={h['video_id']}",
+                    error="视频详情不可用（可能已删除或改为私密），无法确认统计数据", **base))
+                continue
             v = stats.get(h["video_id"], {})
             sn = v.get("snippet", {})
             st = v.get("statistics", {})
@@ -95,8 +100,8 @@ class YouTubeFetcher(BaseFetcher):
                 published_utc=published.strftime("%Y-%m-%d %H:%M:%S UTC"),
                 post_type=self._classify(h["video_id"], cd, live, options.check_shorts),
                 view_count=_num(st.get("viewCount"), "未公开"),
-                like_count=_num(st.get("likeCount"), "未公开（创作者已隐藏）"),
-                comment_count=_num(st.get("commentCount"), "已关闭评论"),
+                like_count=_num(st.get("likeCount"), "未公开或不可用"),
+                comment_count=_num(st.get("commentCount"), "未公开或不可用"),
                 error="",
                 extra={"备注": note, "时长": _pretty_duration(cd.get("duration")),
                        "描述摘要": _summarize(sn.get("description"))},
@@ -232,7 +237,7 @@ class YouTubeFetcher(BaseFetcher):
             for it in data.get("items", []):
                 cd = it.get("contentDetails", {})
                 vid = cd.get("videoId")
-                raw = cd.get("videoPublishedAt") or it.get("snippet", {}).get("publishedAt")
+                raw = cd.get("videoPublishedAt")
                 if not vid or not raw:
                     continue  # 私有或已删除的视频没有发布时间
                 published = _parse_iso(raw)
@@ -245,9 +250,15 @@ class YouTubeFetcher(BaseFetcher):
             page_token = data.get("nextPageToken")
             if not page_token:
                 break
+        else:
+            raise FetchError("达到 --scan-pages 上限，尚未覆盖目标日期；请增大分页上限重试")
 
+        results = list({item["video_id"]: item for item in results}.values())
         results.sort(key=lambda x: x["published_utc"], reverse=True)
         return results
+
+    def close(self):
+        self.http.session.close()
 
     def _video_stats(self, video_ids: list) -> dict:
         out = {}

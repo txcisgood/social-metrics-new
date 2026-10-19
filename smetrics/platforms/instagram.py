@@ -1,23 +1,7 @@
-"""Instagram 采集器 —— 纯 HTTP 为主，浏览器为可选兜底。
+"""Instagram 采集器：非官方网页接口，受权限、登录态和限流影响。
 
-## 为什么不用浏览器
-
-实测：纯 requests 匿名请求 web_profile_info，15 个账号里 12 个直接返回完整数据
-（12 条作品 + 精确粉丝数）。浏览器不是必需的，登录也不是必需的。
-
-## 三条路径，按成本从低到高
-
-1. 主路径：GET web_profile_info。匿名可用，一次请求拿到粉丝数和前 12 条作品。
-2. 兜底一：部分账号主接口恒返回 400（Instagram 服务端自己的 bug，错误信息是
-   ig_business_category_subvertical 资产被删；换 UA、换 i.instagram.com 域名都一样）。
-   这时改走 /api/v1/feed/user/{user_id}/，匿名同样可用。
-   难点在于拿 user_id —— 匿名 HTML 里没有，能查 id 的接口都要求登录。
-   但 user_id 永久不变，所以缓存一次就够了，缓存文件 .cache/ig_user_ids.json。
-3. 兜底二：年龄限制的账号匿名读不到内容（接口返回空而不是报错，这点很坑）。
-   这类账号需要登录态，在 config.json 里填一个 sessionid 即可，仍然不需要浏览器。
-
-浏览器路径（--use-browser）只在一种场景下有价值：既没有 sessionid、又要为新账号
-解析 user_id。日常跑不需要它。
+先读取 web_profile_info，必要时使用 feed 分页。仅在完整覆盖目标日期后
+返回结果；HTTP 429 停止本轮平台请求。--use-browser 仅用于解析 user id。
 """
 
 import json
@@ -26,13 +10,13 @@ import random
 import re
 import time
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlencode
 from zoneinfo import ZoneInfo
 
 import requests
 
 from .base import BaseFetcher
-from ..http import FetchError
+from ..http import FetchError, RateLimited
 from ..models import PostMetric, STATUS_OK, STATUS_NO_POST, date_label
 
 IG_APP_ID = "936619743392459"          # 网页版 Instagram 自己用的固定 app id
@@ -50,7 +34,7 @@ SEED_USER_IDS = {
 
 
 class NeedSession(Exception):
-    """需要 sessionid 才能继续，附带可操作的指引。"""
+    """需要有效登录态才能继续，附带当前模式的操作指引。"""
 
 
 class InstagramFetcher(BaseFetcher):
@@ -59,12 +43,19 @@ class InstagramFetcher(BaseFetcher):
 
     def __init__(self, sessionid: str = None, cache_path: str = None,
                  min_delay: float = 2.5, max_delay: float = 5.0,
-                 use_browser: bool = False, timeout: int = 25, quiet: bool = False):
-        self.sessionid = (sessionid or "").strip()
+                 use_browser: bool = False, timeout: int = 25, quiet: bool = False,
+                 transport: str = "http", browser_port: int = 9222):
+        if transport not in ("http", "browser"):
+            raise ValueError("Instagram transport 必须是 http 或 browser")
+        if min_delay < 0 or max_delay < min_delay:
+            raise ValueError("Instagram 等待时间必须满足 0 <= min_delay <= max_delay")
+        self.transport = transport
+        self.sessionid = (sessionid or "").strip() if transport == "http" else ""
+        self.has_session = bool(self.sessionid) or transport == "browser"
         self.cache_path = cache_path
         self.min_delay = min_delay
         self.max_delay = max_delay
-        self.use_browser = use_browser
+        self.use_browser = use_browser and transport == "http"
         self.timeout = timeout
         self.quiet = quiet
         self.api_calls = 0
@@ -75,7 +66,11 @@ class InstagramFetcher(BaseFetcher):
         self._ids = dict(SEED_USER_IDS)
         self._ids.update(_load_cache(cache_path))
 
-        self.session = requests.Session()
+        if transport == "browser":
+            from ..instagram_browser import InstagramBrowserSession
+            self.session = InstagramBrowserSession(browser_port)
+        else:
+            self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": UA,
             "Accept-Language": "en-US,en;q=0.9",
@@ -91,9 +86,16 @@ class InstagramFetcher(BaseFetcher):
         """先访问一次首页拿 csrftoken / mid，匿名请求也需要这些基础 cookie。"""
         if self._warmed:
             return
+        if self.transport == "browser":
+            self.session.prepare()
+            self._warmed = True
+            if not self.quiet:
+                print("  Instagram：已登录浏览器模式（只读请求，登录状态由浏览器维护）")
+            return
         try:
-            self.session.get(BASE + "/", timeout=self.timeout)
+            response = self.session.get(BASE + "/", timeout=self.timeout)
             self.api_calls += 1
+            _check_rate_limit(response.status_code)
         except requests.RequestException:
             pass
         self._warmed = True
@@ -111,6 +113,7 @@ class InstagramFetcher(BaseFetcher):
             raise FetchError("从链接里解析不出用户名，请确认是主页链接而不是某条帖子")
 
         user, via = self._load_user(username)
+        user = self._complete_timeline(username, user, options)
 
         base = dict(
             row_no=account.row_no,
@@ -134,10 +137,8 @@ class InstagramFetcher(BaseFetcher):
             note = (note + f" 数据来自{via}").strip()
         if user.get("followers_approx"):
             note = (note + " 粉丝数为主页展示的近似值").strip()
-        elif user.get("followers") is None and via != "主接口" and not self.sessionid:
+        elif user.get("followers") is None and via != "主接口" and not self.has_session:
             note = (note + " 该账号粉丝数需配置 instagram_sessionid 才能获取").strip()
-        if hits and len(hits) == len(posts) and len(posts) >= 12:
-            note = (note + " 主页前 12 条全部命中，可能还有当天内容未取到").strip()
 
         if not hits:
             hint = ""
@@ -155,8 +156,8 @@ class InstagramFetcher(BaseFetcher):
                 published_utc=published.strftime("%Y-%m-%d %H:%M:%S UTC"),
                 post_type=_post_type(node),
                 view_count=node.get("views") if node.get("views") is not None else "",
-                like_count=_count(node.get("likes"), "未公开（已隐藏点赞）"),
-                comment_count=_count(node.get("comments"), "已关闭评论"),
+                like_count=_count(node.get("likes"), "未公开或不可用"),
+                comment_count=_count(node.get("comments"), "未公开或不可用"),
                 error="",
                 extra={"备注": note, "时长": ""},
                 **base,
@@ -168,14 +169,16 @@ class InstagramFetcher(BaseFetcher):
         status, user = self._web_profile_info(username)
 
         if status == 429:
-            raise FetchError("被 Instagram 限流了，等几分钟再跑，或把 --ig-min-delay 调大")
-        if status in (401, 403) and not self.sessionid:
-            raise NeedSession(_session_hint("主接口要求登录"))
+            raise RateLimited("Instagram 返回 HTTP 429，本轮停止该平台；请等待限流解除后重试")
+        if status in (401, 403):
+            raise NeedSession(self._session_hint("主接口要求有效登录态"))
         if status == 200 and user:
             # 私密账号返回的是 is_private=true 且作品为空，要先判掉再看作品
             if user.get("is_private") and not user["posts"]:
+                if self.transport == "browser":
+                    raise FetchError("这是私密账号，请确认独立 Edge 中登录的账号已获准关注该账号")
                 raise FetchError("这是私密账号，需要用一个已关注它的账号的 sessionid 才能看到内容")
-            if user["posts"]:
+            if user["posts"] or (user.get("total_count") == 0 and not user.get("has_more")):
                 return user, "主接口"
 
         # 主接口不可用或返回空 → 走 feed 接口
@@ -185,15 +188,17 @@ class InstagramFetcher(BaseFetcher):
             if feed_status == 200 and feed_user and feed_user["posts"]:
                 return feed_user, f"兜底 feed 接口（主接口返回 {status}）"
             if feed_status == 429:
-                raise FetchError("被 Instagram 限流了，等几分钟再跑")
-            if not self.sessionid:
-                raise NeedSession(_session_hint(
+                raise RateLimited("Instagram 返回 HTTP 429，本轮停止该平台；请等待限流解除后重试")
+            if feed_status in (401, 403):
+                raise NeedSession(self._session_hint("feed 接口要求有效登录态"))
+            if not self.has_session:
+                raise NeedSession(self._session_hint(
                     f"@{username} 匿名读不到内容（很可能设了年龄限制）"))
             raise FetchError(
                 f"主接口返回 {status}，feed 接口返回 {feed_status} 且没有内容，请手动打开主页确认")
 
-        if not self.sessionid:
-            raise NeedSession(_session_hint(
+        if not self.has_session:
+            raise NeedSession(self._session_hint(
                 f"@{username} 主接口返回 {status}，且匿名状态下拿不到它的 user id"))
         raise FetchError(f"主接口返回 {status}，且无法解析 user id，请手动打开主页确认")
 
@@ -217,10 +222,13 @@ class InstagramFetcher(BaseFetcher):
         if not raw_user:
             return 200, None
 
+        timeline = raw_user.get("edge_owner_to_timeline_media") or {}
+        page_info = timeline.get("page_info") or {}
         posts = []
-        for edge in ((raw_user.get("edge_owner_to_timeline_media") or {}).get("edges") or []):
+        for edge in (timeline.get("edges") or []):
             n = edge.get("node") or {}
             posts.append({
+                "pinned": bool(n.get("is_pinned") or n.get("pinned_for_users")),
                 "shortcode": n.get("shortcode") or "",
                 "ts": n.get("taken_at_timestamp"),
                 "product_type": n.get("product_type") or "",
@@ -236,15 +244,21 @@ class InstagramFetcher(BaseFetcher):
             self._remember_id(username, str(raw_user["id"]))
 
         return 200, {
+            "source": "profile",
+            "total_count": timeline.get("count"),
+            "has_more": page_info.get("has_next_page"),
             "is_private": bool(raw_user.get("is_private")),
             "followers": (raw_user.get("edge_followed_by") or {}).get("count"),
             "posts": posts,
         }
 
-    def _feed(self, username: str, user_id: str) -> tuple:
+    def _feed(self, username: str, user_id: str, cursor=None, include_followers=True) -> tuple:
         self._throttle()
+        params = {"count": 50}
+        if cursor:
+            params["max_id"] = cursor
         try:
-            r = self.session.get(f"{BASE}/api/v1/feed/user/{user_id}/?count=12",
+            r = self.session.get(f"{BASE}/api/v1/feed/user/{user_id}/?{urlencode(params)}",
                                  headers={"Referer": f"{BASE}/{username}/"}, timeout=self.timeout)
         except requests.RequestException as e:
             raise FetchError(f"网络异常：{type(e).__name__}")
@@ -253,7 +267,10 @@ class InstagramFetcher(BaseFetcher):
         if r.status_code != 200:
             return r.status_code, None
         try:
-            items = r.json().get("items") or []
+            payload = r.json()
+            if payload.get("status") == "fail" or "items" not in payload:
+                return -1, None
+            items = payload.get("items") or []
         except ValueError:
             return -1, None
 
@@ -261,6 +278,7 @@ class InstagramFetcher(BaseFetcher):
         for n in items:
             media_type = n.get("media_type")
             posts.append({
+                "pinned": bool(n.get("is_pinned") or n.get("pinned_for_users")),
                 "shortcode": n.get("code") or "",
                 "ts": n.get("taken_at"),
                 "product_type": n.get("product_type") or "",
@@ -271,9 +289,47 @@ class InstagramFetcher(BaseFetcher):
                 "comments": n.get("comment_count"),
                 "caption": ((n.get("caption") or {}).get("text") or "")[:500],
             })
-        followers, approx = self._followers(username)
-        return 200, {"is_private": False, "followers": followers,
+        followers, approx = self._followers(username) if include_followers else (None, False)
+        return 200, {"source": "feed", "has_more": payload.get("more_available"),
+                     "next_cursor": payload.get("next_max_id"),
+                     "is_private": False, "followers": followers,
                      "followers_approx": approx, "posts": posts}
+
+    def _complete_timeline(self, username, user, options):
+        """Only report no posts once the requested date range is covered."""
+        start = datetime.strptime(min(options.target_dates), "%Y-%m-%d").replace(
+            tzinfo=ZoneInfo(options.tz_name)).timestamp()
+        collected = {}
+        page = user
+        seen_cursors = set()
+        for page_no in range(options.scan_pages):
+            posts = page["posts"]
+            for post in posts:
+                if not post.get("shortcode") or not post.get("ts"):
+                    raise FetchError("Instagram 内容缺少链接或发布时间，无法确认采集完整性")
+                collected[post["shortcode"]] = post
+            # Pinned old posts do not prove that the normal timeline reached the window.
+            older = any(p["ts"] < start and not p.get("pinned") for p in posts)
+            if page.get("has_more") is False or older or user.get("total_count") == 0:
+                return dict(user, posts=list(collected.values()))
+            if page_no + 1 >= options.scan_pages:
+                raise FetchError("Instagram 达到 --scan-pages 上限，尚未覆盖目标日期；请增大上限重试")
+            cursor = page.get("next_cursor")
+            if page.get("source") == "feed":
+                if not cursor or cursor in seen_cursors:
+                    raise FetchError("Instagram 分页游标缺失或重复，无法确认目标日期是否完整")
+                seen_cursors.add(cursor)
+            uid = self._resolve_user_id(username)
+            if not uid:
+                raise NeedSession(self._session_hint("翻页需要 user id，但当前无法解析"))
+            status, page = self._feed(username, uid, cursor, include_followers=False)
+            if status != 200 or not page:
+                if status in (401, 403):
+                    raise NeedSession(self._session_hint("翻页要求有效登录态"))
+                if status == 429:
+                    raise RateLimited("Instagram 翻页返回 HTTP 429，目标日期未查全；本轮停止该平台")
+                raise FetchError(f"Instagram 翻页失败（HTTP {status}），目标日期未查全")
+        raise FetchError("Instagram 分页上限必须大于 0")
 
     def _followers(self, username: str) -> tuple:
         """feed 接口不带粉丝数。
@@ -282,13 +338,14 @@ class InstagramFetcher(BaseFetcher):
         对象也没有 follower_count（都实测过）。所以只在有 sessionid 时才去查，
         避免每个兜底账号白发一次 700KB 的主页请求。
         """
-        if not self.sessionid:
+        if not self.has_session:
             return None, False
         self._throttle()
         try:
             r = self.session.get(f"{BASE}/api/v1/users/{username}/usernameinfo/",
                                  headers={"Referer": f"{BASE}/{username}/"}, timeout=self.timeout)
             self.api_calls += 1
+            _check_rate_limit(r.status_code)
             if r.status_code == 200:
                 count = (r.json().get("user") or {}).get("follower_count")
                 if isinstance(count, int):
@@ -301,6 +358,7 @@ class InstagramFetcher(BaseFetcher):
         try:
             r = self.session.get(f"{BASE}/{username}/", timeout=self.timeout)
             self.api_calls += 1
+            _check_rate_limit(r.status_code)
         except requests.RequestException:
             return None, False
         if r.status_code != 200:
@@ -320,12 +378,13 @@ class InstagramFetcher(BaseFetcher):
             return self._ids[key]
 
         # 带 sessionid 时可以直接查，这是最省事的方式
-        if self.sessionid:
+        if self.has_session:
             self._throttle()
             try:
                 r = self.session.get(f"{BASE}/api/v1/users/{username}/usernameinfo/",
                                      headers={"Referer": f"{BASE}/{username}/"}, timeout=self.timeout)
                 self.api_calls += 1
+                _check_rate_limit(r.status_code)
                 if r.status_code == 200:
                     pk = (r.json().get("user") or {}).get("pk")
                     if pk:
@@ -355,12 +414,20 @@ class InstagramFetcher(BaseFetcher):
                 self._page = self._browser.open_page(BASE + "/", reuse_host="instagram.com")
             probe = """
             (async () => {
-              const t = await (await fetch(%s, {credentials: "include"})).text();
+              const r = await fetch(%s, {credentials: "include"});
+              if (r.status !== 200) return {status: r.status, user_id: ""};
+              const t = await r.text();
               const m = t.match(/"profile_id":"(\\d+)"/) || t.match(/profilePage_(\\d+)/);
-              return m ? m[1] : "";
+              return {status: r.status, user_id: m ? m[1] : ""};
             })()
             """ % json.dumps(f"{BASE}/{username}/")
-            return (self._page.evaluate(probe, await_promise=True, timeout=60) or "").strip()
+            result = self._page.evaluate(probe, await_promise=True, timeout=60)
+            if not isinstance(result, dict):
+                return ""
+            _check_rate_limit(result.get("status"))
+            return (result.get("user_id") or "").strip()
+        except RateLimited:
+            raise
         except Exception:
             return ""
 
@@ -372,6 +439,13 @@ class InstagramFetcher(BaseFetcher):
         _save_cache(self.cache_path, self._ids)
 
     # ---------- 杂项 ----------
+
+    def _session_hint(self, reason: str) -> str:
+        if self.transport == "browser":
+            return (f"{reason}。请在 start_instagram_browser.py 打开的独立 Edge 窗口中"
+                    "重新登录 Instagram，并完成页面上的账号验证；保持 Instagram 首页打开后重试。"
+                    "浏览器模式不需要复制 Cookie 或填写 instagram_sessionid。")
+        return _session_hint(reason)
 
     def _throttle(self) -> None:
         elapsed = time.time() - self._last_call
@@ -392,6 +466,11 @@ class InstagramFetcher(BaseFetcher):
 
 
 # ---------- 解析工具 ----------
+
+def _check_rate_limit(status_code) -> None:
+    if status_code == 429:
+        raise RateLimited("Instagram 返回 HTTP 429，本轮停止该平台；请等待限流解除后重试")
+
 
 def _session_hint(reason: str) -> str:
     return (f"{reason}。解决办法（不用装插件，也不用开浏览器跑）："

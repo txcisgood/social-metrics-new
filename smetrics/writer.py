@@ -15,7 +15,7 @@ HEADERS = ["行号", "账号名", "平台", "主页链接", "目标日期", "当
            "粉丝数", "播放", "点赞", "评论", "抓取时间", "备注"]
 
 STATUS_TEXT = {STATUS_OK: "有", STATUS_NO_POST: "无", STATUS_FAILED: "抓取失败"}
-PLATFORM_TEXT = {"youtube": "YouTube", "instagram": "Instagram", "facebook": "Facebook"}
+PLATFORM_TEXT = {"youtube": "YouTube", "instagram": "Instagram"}
 
 HEADER_FILL = PatternFill("solid", fgColor="1F4E79")
 OK_FILL = PatternFill("solid", fgColor="E2EFDA")
@@ -36,7 +36,7 @@ def write_excel(results: list, out_path: str, run_meta: dict) -> str:
         elif r.status == STATUS_NO_POST and r.extra.get("提示"):
             note = r.extra["提示"]
 
-        ws.append([
+        _append_data(ws, [
             r.row_no,
             r.account_name,
             PLATFORM_TEXT.get(r.platform, r.platform),
@@ -68,7 +68,7 @@ def write_excel(results: list, out_path: str, run_meta: dict) -> str:
         ws2 = wb.create_sheet("待人工核对")
         _write_header(ws2, ["行号", "账号名", "平台", "主页链接", "失败原因", "建议"])
         for r in failed:
-            ws2.append([r.row_no, r.account_name, PLATFORM_TEXT.get(r.platform, r.platform),
+            _append_data(ws2, [r.row_no, r.account_name, PLATFORM_TEXT.get(r.platform, r.platform),
                         r.profile_url, r.error, _suggest(r.error)])
             _linkify(ws2.cell(row=ws2.max_row, column=4))
         _finish_sheet(ws2, [6, 22, 11, 38, 50, 42])
@@ -77,7 +77,7 @@ def write_excel(results: list, out_path: str, run_meta: dict) -> str:
     ws3.append(["项目", "值"])
     _write_header(ws3, ["项目", "值"], overwrite=True)
     for k, v in run_meta.items():
-        ws3.append([k, str(v)])
+        _append_data(ws3, [k, str(v)])
     _finish_sheet(ws3, [26, 70])
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -101,9 +101,9 @@ def print_summary(results: list, warnings: list, run_meta: dict):
     print("\n" + "=" * 62)
     print(f"目标日期：{run_meta.get('目标日期')}   时区：{run_meta.get('判定时区')}")
     print(f"账号数：{run_meta.get('账号数')}   API 请求数：{run_meta.get('API 请求次数')}")
-    print(f"当天有发布：{len({r.account_name for r in ok})} 个账号 / 共 {len(ok)} 条作品")
-    print(f"当天无发布：{len(none_)} 个账号")
-    print(f"抓取失败　：{len(failed)} 个账号")
+    print(f"当天有发布：{len({(r.platform, r.row_no) for r in ok})} 个账号 / 共 {len(ok)} 条作品")
+    print(f"当天无发布：{len({(r.platform, r.row_no) for r in none_})} 个账号")
+    print(f"抓取失败　：{len({(r.platform, r.row_no) for r in failed})} 个账号")
     print("=" * 62)
 
     for r in ok:
@@ -119,6 +119,14 @@ def default_out_paths(out_dir: str, tag: str) -> tuple:
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     base = os.path.join(out_dir, f"社媒动态-{tag}-{stamp}")
     return base + ".xlsx", base + ".jsonl"
+
+
+def _append_data(ws, values):
+    """External text must remain literal text, including captions starting with '='."""
+    ws.append(values)
+    for cell in ws[ws.max_row]:
+        if isinstance(cell.value, str):
+            cell.data_type = "s"
 
 
 def _write_header(ws, headers, overwrite=False):

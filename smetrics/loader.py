@@ -179,9 +179,9 @@ def _clean_url(url: str) -> str:
 
 def _infer_platform(url: str) -> str:
     host = (urlparse(url).netloc or "").lower()
-    target = host + urlparse(url).path.lower()
+    target = host
     for platform, patterns in PLATFORM_PATTERNS:
-        if any(re.search(p, target) for p in patterns):
+        if any(re.fullmatch(r"(?:[a-z0-9-]+\.)*" + p, target) for p in patterns):
             return platform
     return ""
 

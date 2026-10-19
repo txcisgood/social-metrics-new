@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Social Metrics · 社媒采集",
+  "version": "0.4.1",
+  "description": "在已登录的 Instagram 标签页读取账号动态，支持 YouTube Data API，导入账号表并导出 Excel。",
+  "minimum_chrome_version": "120",
+  "permissions": ["scripting", "storage"],
+  "host_permissions": ["https://www.instagram.com/*", "https://www.googleapis.com/*"],
+  "background": {"service_worker": "background.mjs", "type": "module"},
+  "action": {"default_title": "打开社媒采集"},
+  "content_security_policy": {"extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'; connect-src https://www.googleapis.com"}
+}

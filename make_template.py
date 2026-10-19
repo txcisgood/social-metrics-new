@@ -11,8 +11,7 @@ SAMPLES = [
     ("MrBeast", "https://www.youtube.com/@MrBeast", "YouTube"),
     ("Marques Brownlee", "https://www.youtube.com/@mkbhd", "YouTube"),
     ("Google", "https://www.youtube.com/channel/UCK8sQmJBp8GCxrOtXWBpyEA", "YouTube"),
-    ("示例-个人号IG（暂未接入）", "https://www.instagram.com/natgeo/", "Instagram"),
-    ("示例-FB主页（暂未接入）", "https://www.facebook.com/natgeo", "Facebook"),
+    ("示例-Instagram", "https://www.instagram.com/natgeo/", "Instagram"),
 ]
 
 
@@ -39,10 +38,10 @@ def main():
         ["账号名", "随便填，只用于输出时标识，可以是中文"],
         ["主页链接", "支持 youtube.com/@handle、/channel/UCxxx、/c/xxx、/user/xxx，"
                      "也能直接贴某个视频链接（会自动换成它所属频道）"],
-        ["平台", "填 YouTube / Instagram / Facebook 均可；填错也没关系，程序以链接为准"],
+        ["平台", "填 YouTube / Instagram 均可；填错也没关系，程序以链接为准"],
         ["", ""],
         ["注意", "列顺序可以打乱，程序按表头识别；没有表头时按 名称/链接/平台 三列顺序读"],
-        ["注意", "Instagram 与 Facebook 当前版本会自动跳过，接入后无需改表格"],
+        ["注意", "Instagram 请填写主页链接；访问受限时需要登录态"],
     ]:
         tips.append(line)
     tips.column_dimensions["A"].width = 14

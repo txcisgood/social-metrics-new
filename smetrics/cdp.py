@@ -2,12 +2,12 @@
 
 为什么要独立实例：用户日常那个 Chrome 一直开着，同一个 profile 目录不能被两个进程同时占用，
 强行复用会导致启动失败或者要求用户退出浏览器。所以这里用一个专属的 user-data-dir，
-用户在里面登录一次 Instagram / Facebook，登录态就长期留着，跟日常浏览器互不干扰。
+用户在里面登录一次 Instagram，登录态就长期留着，跟日常浏览器互不干扰。
 
 为什么用 CDP 而不是 Playwright：只需要「在已登录的页面里执行一段 fetch」这一个能力，
 CDP 的 Runtime.evaluate 就够了，省掉 Playwright 上百 MB 的驱动依赖。
 
-Instagram / Facebook 的接口都要求登录态和一堆签名头，但只要请求是从站内页面发出的，
+Instagram 的接口都要求登录态和一堆签名头，但只要请求是从站内页面发出的，
 浏览器会自动带上 cookie 和正确的同源上下文，我们就不用自己算签名。
 """
 
@@ -153,17 +153,29 @@ class ChromeSession:
 class PageSession:
     def __init__(self, ws_url: str, quiet: bool = False):
         self.quiet = quiet
+        direct_socket = None
         try:
-            self.ws = websocket.create_connection(ws_url, timeout=60,
-                                                  suppress_origin=True, enable_multithread=True)
+            connection_options = dict(timeout=60, suppress_origin=True, enable_multithread=True)
+            address = urllib.parse.urlsplit(ws_url)
+            if address.scheme == 'ws' and address.hostname in ('127.0.0.1', 'localhost', '::1'):
+                # A preconnected socket bypasses websocket-client's environment-proxy
+                # lookup. Some versions ignore http_no_proxy without a proxy host.
+                direct_socket = socket.create_connection((address.hostname, address.port or 80), timeout=60)
+                connection_options['socket'] = direct_socket
+            self.ws = websocket.create_connection(ws_url, **connection_options)
         except Exception as e:
+            if direct_socket is not None:
+                direct_socket.close()
             raise BrowserError(f"连接页面调试通道失败：{e}")
         self._id = 0
 
     def _send(self, method: str, params: dict = None, timeout: int = 60):
         self._id += 1
         msg_id = self._id
-        self.ws.send(json.dumps({"id": msg_id, "method": method, "params": params or {}}))
+        try:
+            self.ws.send(json.dumps({"id": msg_id, "method": method, "params": params or {}}))
+        except Exception as e:
+            raise BrowserError(f"调试通道断开：{e}") from None
         deadline = time.time() + timeout
         while time.time() < deadline:
             self.ws.settimeout(max(1, deadline - time.time()))

@@ -188,7 +188,9 @@ rows_all = rows + rows2 + [PostMetric(
     profile_url="https://www.youtube.com/@nonexistent_xyz", target_date=TARGET,
     status=STATUS_FAILED, error="频道 UCxxx 查不到（可能已注销或被封）",
     fetched_at="2026-08-29 12:00:00")]
-out_dir = os.path.join(HERE, "results")
+import tempfile
+_test_output = tempfile.TemporaryDirectory(prefix="smetrics-test-")
+out_dir = _test_output.name
 xlsx, jsonl = writer.default_out_paths(out_dir, "自测")
 writer.write_excel(rows_all, xlsx, {"目标日期": TARGET, "判定时区": "Asia/Shanghai",
                                     "账号数": 2, "API 请求次数": f.http.api_calls})
@@ -221,7 +223,7 @@ f.http.hidden_subs = False
 
 # ---------------- 7. 回填原表 ----------------
 print("\n[7] 回填原表（用真实的网红list文件）")
-REAL = "/Users/xavier/Downloads/网红list.xlsx"
+REAL = os.path.join(HERE, "网红list.xlsx")
 if not os.path.exists(REAL):
     print("  - 跳过：找不到真实表格文件")
 else:
@@ -317,7 +319,7 @@ def wpi_payload(private=False):
     return {"data": {"user": {
         "id": "555000", "is_private": private,
         "edge_followed_by": {"count": 45231},
-        "edge_owner_to_timeline_media": {"edges": [
+        "edge_owner_to_timeline_media": {"page_info": {"has_next_page": False}, "edges": [
             node("AAA", ts(2026, 8, 29, 9, 30), product_type="clips", __typename="GraphVideo",
                  is_video=True, video_play_count=20345, likes=1502, comments=88,
                  cap="Out on the hill today\n\n#stalking #highlands"),
@@ -327,7 +329,7 @@ def wpi_payload(private=False):
         ]}}}}
 
 
-FEED_PAYLOAD = {"items": [
+FEED_PAYLOAD = {"more_available": False, "items": [
     {"code": "FFF", "taken_at": ts(2026, 8, 29, 11, 0), "media_type": 2,
      "product_type": "clips", "play_count": 2272, "like_count": 71, "comment_count": 8,
      "caption": {"text": "Fallback reel"}},
@@ -469,90 +471,13 @@ except Exception as e:
 
 priv_payload = {"data": {"user": {"id": "9", "is_private": True,
                                   "edge_followed_by": {"count": 12},
-                                  "edge_owner_to_timeline_media": {"edges": []}}}}
+                                  "edge_owner_to_timeline_media": {"page_info": {"has_next_page": False}, "edges": []}}}}
 ig6 = make_ig([("web_profile_info", FakeResp(200, priv_payload))])
 try:
     ig6.fetch(ig_account, day)
     check("私密账号给出明确报错", False, "没有抛异常")
 except Exception as e:
     check("私密账号给出明确报错", "私密账号" in str(e), str(e)[:60])
-
-
-# ---------------- 9. Facebook 解析（接管已登录 Edge 的 HTML，不需要真浏览器）----
-print("\n[9] Facebook（接管已登录 Edge，解析页面内嵌 JSON）")
-from smetrics.platforms.facebook import (
-    _parse_page, _pick_facebook_target, _page_key, NeedLogin,
-)
-from smetrics.http import FetchError
-
-
-def fb_realistic_html():
-    """模拟已登录 Edge 拿到的 www.facebook.com 主页 HTML（2026 年结构）。"""
-    t1, t2 = ts(2026, 8, 28, 14, 30), ts(2026, 8, 26, 10, 0)
-    return (
-        '<html><body>\n'
-        '<script>{"post_id": "1712922337501719", "creation_time": ' + str(t1) + ', '
-        '"message": {"text": "Send us some of your best sightings in the comments below!"}, '
-        '"reaction_count": {"count": 92}, "comments": {"total_count": 3}, "share_count": {"count": 3}}</script>\n'
-        '<script>{"post_id": "1712922337501720", "creation_time": ' + str(t2) + ', '
-        '"message": {"text": "Another episode of The Stalkers Tales"}, '
-        '"reaction_count": {"count": 240}, "comments": {"total_count": 18}, "share_count": {"count": 0}}</script>\n'
-        '<script>{"follower_count":5964,"name":"Scott"}</script>\n'
-        '</body></html>'
-    )
-
-
-posts, followers = _parse_page(fb_realistic_html())
-check("解析出 2 条帖子（不同 post_id）", len(posts) == 2, f"{len(posts)} 条")
-check("帖子按 creation_time 正确提取", all(p["ts"] > 1.7e9 for p in posts), str([p["ts"] for p in posts]))
-check("粉丝数 follower_count=5964 抽出", followers == 5964, str(followers))
-check("reaction_count 抽出 92", any(p["reactions"] == 92 for p in posts), str([p["reactions"] for p in posts]))
-check("comments.total_count 抽出 3", any(p["comments"] == 3 for p in posts), str([p["comments"] for p in posts]))
-check("share_count 抽出 3（第一条）", posts[0]["shares"] == 3 if posts else False, "")
-check("第二条 share_count=0", posts[1]["shares"] == 0 if len(posts) > 1 else False, "")
-check("message.text 解码", posts[0]["title"] == "Send us some of your best sightings in the comments below!",
-      repr(posts[0]["title"] if posts else None))
-check("post_url 由 post_id 构造", posts[0]["url"].endswith("1712922337501719") if posts else False,
-      str(posts[0]["url"] if posts else None))
-
-# 跨多个 follower_count 实例（页面有重复块），取第一个
-html_multi = fb_realistic_html().replace('"follower_count":5964', '"follower_count":5964"\n"follower_count":9999')
-posts2, f2 = _parse_page(html_multi)
-check("重复 follower_count 取首值", f2 == 5964, str(f2))
-
-# 主页存在但一条帖子都没解析到（个人页对非好友隐藏）
-posts3, _ = _parse_page("<html><body>empty profile page</body></html>")
-check("空页面解析出 0 条帖子", len(posts3) == 0, f"{len(posts3)} 条")
-
-# 标签页挑选：9222 targets 里挑一个 facebook.com page
-fake_targets = [
-    {"type": "page", "url": "about:blank", "webSocketDebuggerUrl": "ws://x"},
-    {"type": "page", "url": "https://www.facebook.com/scott", "webSocketDebuggerUrl": "ws://y"},
-    {"type": "iFrame", "url": "https://facebook.com/x", "webSocketDebuggerUrl": "ws://z"},
-]
-picked = _pick_facebook_target(fake_targets)
-check("标签页挑选：选 page+facebook.com+有 ws",
-      picked and picked["webSocketDebuggerUrl"] == "ws://y", str(picked))
-check("标签页挑选：无候选返回 None", _pick_facebook_target([]) is None, "")
-
-# _page_key 从链接里抽标识
-check("profile.php 抽 id", _page_key("https://www.facebook.com/profile.php?id=123") == "123", "")
-check("vanity 主页抽段名", _page_key("https://www.facebook.com/scott") == "scott", "")
-
-# NeedLogin 异常类可被 run.py 捕获
-check("NeedLogin 是 Exception 子类", issubclass(NeedLogin, Exception), "")
-
-
-# ---------------- 10. 真实网络：频道 ID 解析兜底 ----------------
-print("\n[10] 真实网络验证（不消耗 API 配额）")
-real = YouTubeFetcher("INVALID_KEY_ON_PURPOSE", cache_path=None)
-for url, desc in [("https://www.youtube.com/@mkbhd", "@handle 网页兜底解析"),
-                  ("https://www.youtube.com/c/Google", "/c/ 自定义链接解析")]:
-    try:
-        cid = real._scrape_channel_id(url)
-        check(f"{desc} → {cid or '(空)'}", bool(cid) and cid.startswith("UC"))
-    except Exception as e:
-        check(desc, False, f"{type(e).__name__}: {e}")
 
 
 print("\n" + "=" * 60)

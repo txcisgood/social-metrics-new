@@ -10,11 +10,15 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 
 
 class QuotaExceeded(Exception):
-    """API 配额耗尽，继续跑没有意义，直接中止整轮。"""
+    """API 配额耗尽，中止当前平台。"""
 
 
 class FetchError(Exception):
     """单个账号级别的失败，不影响其他账号。"""
+
+
+class RateLimited(FetchError):
+    """平台限流，本轮停止后续请求。"""
 
 
 class HttpClient:
