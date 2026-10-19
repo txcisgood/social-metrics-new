@@ -7,8 +7,17 @@ import {resolveDates, dateRangeLabel, localDate, runAccounts, failedRow} from '.
 import {describeError} from './lib/errors.mjs';
 import {createDiagnostics} from './lib/diagnostics.mjs';
 import {persistDiagnostics, latestDiagnostics, clearStoredDiagnostics} from './lib/diagnostic-store.mjs';
+import {createPreferencesStore, PREFERENCE_FIELDS} from './lib/preferences.mjs';
+import {APPEARANCE_CHOICES, createAppearanceController} from './lib/appearance.mjs';
+import {initSettingHelp} from './lib/help.mjs';
 
 const $ = id => document.getElementById(id);
+const appearance = createAppearanceController();
+initSettingHelp();
+const editedAppearanceFields = new Set();
+function applyAppearance() {
+  appearance.update({themeMode: $('themeMode').value, interfaceStyle: $('interfaceStyle').value});
+}
 const extension = Boolean(globalThis.chrome?.runtime?.id);
 let workbook, accounts = [], warnings = [], results = [], meta = {}, controller;
 let inputName = '';
@@ -18,6 +27,8 @@ let igOperationCount = 0, ytRequestCount = 0, startedAt = 0, elapsedMs = 0, elap
 let waitUntil = 0, phaseText = '等待导入账号';
 let accountScan = {pages: 0, details: 0, discovered: 0, posts: 0};
 let logTimer, logSaveChain = Promise.resolve(), logStorageFailed = false;
+const preferences = createPreferencesStore();
+let preferenceRevision = 0, preferenceStorageFailed = false;
 const diagnosticEnvironment = {
   version: extension ? chrome.runtime.getManifest().version : 'preview',
   browser: /Edg\/[\d.]+/.exec(navigator.userAgent)?.[0] || /Chrome\/[\d.]+/.exec(navigator.userAgent)?.[0] || 'unknown',
@@ -67,6 +78,91 @@ function restoreDateOptions(options = {}) {
     element.value = value; editedDateFields.add(id);
   }
   updateDateDefaults();
+}
+
+function restorePreferences(saved) {
+  if (!saved) return;
+  for (const id of PREFERENCE_FIELDS) {
+    if (saved.settings[id] === undefined || editedAppearanceFields.has(id)) continue;
+    $(id).value = String(saved.settings[id]);
+    if (dateFields.includes(id)) editedDateFields.add(id);
+  }
+  applyAppearance();
+  $('rememberYoutubeKey').checked = saved.rememberYoutubeKey;
+  $('youtubeKey').value = saved.youtubeKey || '';
+  diagnostics.addSecret($('youtubeKey').value);
+  $('preferencesFeedback').textContent = '已恢复上次配置。账号文件需重新选择。';
+  renderKeyPreference(saved);
+}
+
+function renderKeyPreference(saved) {
+  $('rememberYoutubeKey').checked = saved.rememberYoutubeKey;
+  $('youtubeKeyFeedback').textContent = saved.youtubeKey ? '密钥已保存在当前浏览器，下次会自动填入。'
+    : saved.rememberYoutubeKey ? '填写后自动保存在本机。' : '密钥仅供当前页面使用，关闭后需要重新填写。';
+}
+
+function preferenceFailure(reading = false) {
+  $('preferencesFeedback').textContent = reading ? '暂时无法读取上次配置。可先填写后采集，重新打开工作页可重试读取。'
+    : '配置暂未保存成功。可继续采集；请保留本页，并重新操作未保存的设置。';
+  $('preferencesFeedback').dataset.error = 'true';
+  $('youtubeKeyFeedback').textContent = reading ? '暂时无法恢复已保存的密钥，可在本页重新填写。'
+    : '本机保存或清除尚未成功，请重试；当前输入仍可用于采集。';
+  if (!preferenceStorageFailed) {
+    preferenceStorageFailed = true;
+    // Storage exceptions may contain provider details. Do not log the failed
+    // preference object or its key, even when diagnostics are unavailable.
+    recordEvent('preferences.storage_failed', {stage: 'storage'}, 'warning');
+  }
+}
+
+async function savePreferences(patch) {
+  if (!extension) return;
+  diagnostics.addSecret($('youtubeKey').value);
+  const revision = ++preferenceRevision;
+  $('preferencesFeedback').textContent = '正在保存配置…';
+  $('preferencesFeedback').dataset.error = 'false';
+  try {
+    const saved = await preferences.update(patch);
+    preferenceStorageFailed = false;
+    if (revision !== preferenceRevision) return;
+    $('preferencesFeedback').textContent = '配置已保存在当前浏览器，下次打开会自动恢复。';
+    renderKeyPreference(saved);
+  } catch {
+    if (revision === preferenceRevision) preferenceFailure();
+  }
+}
+
+function settingChanged(id) {
+  const isAppearance = Object.hasOwn(APPEARANCE_CHOICES, id);
+  if (isAppearance) {
+    editedAppearanceFields.add(id);
+    applyAppearance();
+  }
+  if (loading && !isAppearance) return;
+  const incomplete = message => {
+    preferenceRevision++;
+    $('preferencesFeedback').textContent = message;
+    $('preferencesFeedback').dataset.error = 'true';
+  };
+  let settings;
+  if (dateFields.includes(id)) {
+    settings = dateOptionsFromForm();
+    try { resolveDates(settings); }
+    catch { incomplete('请补全有效的日期范围，随后会自动保存。'); return; }
+  } else if (id === 'minDelay' || id === 'maxDelay') {
+    settings = {minDelay: Number($('minDelay').value), maxDelay: Number($('maxDelay').value)};
+    if (settings.minDelay < 3 || settings.maxDelay > 120 || settings.minDelay > settings.maxDelay ||
+        !Number.isFinite(settings.minDelay) || !Number.isFinite(settings.maxDelay)) {
+      incomplete('请补全有效的操作间隔，随后会自动保存。'); return;
+    }
+  } else {
+    const element = $(id);
+    if (!element.checkValidity() || !element.value) {
+      incomplete('请补全有效的设置，随后会自动保存。'); return;
+    }
+    settings = {[id]: element.type === 'number' ? Number(element.value) : element.value};
+  }
+  void savePreferences({settings});
 }
 
 function refreshDiagnosticText() {
@@ -189,7 +285,7 @@ function readerProgress(value) {
 }
 
 function renderControls() {
-  document.querySelectorAll('.settings-panel input, .settings-panel select, .settings-panel button').forEach(el => { el.disabled = busy || loading; });
+  document.querySelectorAll('.settings-panel input, .settings-panel select, .settings-panel button:not([data-help-trigger])').forEach(el => { el.disabled = busy || loading; });
   $('startButton').disabled = busy || loading || !extension;
   $('stopButton').disabled = !busy || controller?.signal.aborted;
   $('clearButton').disabled = busy;
@@ -209,10 +305,63 @@ function renderControls() {
   $('scanModeHelp').textContent = $('scanMode').value === 'complete'
     ? '继续向下检查，直到内容读完或达到设置的上限，耗时会更长。'
     : '优先读取目标日期附近的帖子。更早的内容会尽快跳过，未能确认的范围会标记待核对。';
+  if ($('instagramAdvanced')) $('instagramAdvanced').hidden = $('platformSelect').value === 'youtube';
+  renderWorkspaceState();
 }
 
 // Recognize checkpoints produced before the explicit skipped flag was added.
 const wasSkipped = row => row.status === 'FAILED' && (row.skipped === true || row.error?.startsWith('该平台本轮已停止。'));
+
+function renderWorkspaceState() {
+  const platform = $('platformSelect').value;
+  const selected = accounts.filter(account => platform === 'all' || account.platform === platform);
+  const summary = summarize(results);
+  const accountKey = row => JSON.stringify([row.platform, row.row_no]);
+  const represented = new Set(results.map(accountKey));
+  // Pending accounts receive diagnostic rows on cancellation/recovery. They
+  // belong in the review count, but must not inflate collection progress.
+  const processed = new Set(results.filter(row => row.status === 'OK' || row.status === 'NO_POST' ||
+    (row.status === 'FAILED' && !wasSkipped(row) && !['CANCELLED', 'INTERRUPTED'].includes(row.error_code))).map(accountKey));
+  const hasRun = busy || results.length > 0;
+  const savedTotal = Number(meta['账号数']);
+  const total = hasRun ? Math.max(Number.isSafeInteger(savedTotal) && savedTotal > 0 ? savedTotal : 0, represented.size)
+    : selected.length;
+  const stopped = hasRun && (controller?.signal.aborted || results.some(row => row.error_code === 'CANCELLED'));
+  const state = busy ? 'running' : results.length ? stopped ? 'stopped' : summary.failedAccounts ? 'review' : 'complete'
+    : selected.length ? 'ready' : 'idle';
+  const text = (id, value) => { if ($(id)) $(id).textContent = value; };
+  document.body.dataset.state = state;
+  document.body.dataset.platform = platform;
+  text('metricPosts', String(summary.posts));
+  text('metricAccounts', String(processed.size));
+  text('metricReview', String(summary.failedAccounts));
+  text('accountTotalHint', total ? `共 ${total} 个账号` : '等待导入账号');
+  text('progressPercent', `${total ? Math.min(100, Math.floor(processed.size / total * 100)) : 0}%`);
+  text('progressStage', busy ? stopped ? '正在停止' : '正在采集' : state === 'complete' ? '结果已就绪'
+    : ['review', 'stopped'].includes(state) ? '请核对结果' : '待开始');
+  text('inputSummary', busy ? `本轮采集 ${total} 个账号` : selected.length ? `已选 ${selected.length} 个账号，准备开始采集`
+    : accounts.length ? '当前文件没有所选平台的账号' : workbook ? '当前工作表暂无可采集账号' : '尚未导入账号');
+  if (!busy && results.length) {
+    setPhase(state === 'stopped' ? `采集已停止，已处理 ${processed.size} / ${total} 个账号；已读结果可导出`
+      : state === 'review' ? `本轮已结束，已处理 ${processed.size} / ${total} 个账号；${summary.failedAccounts} 个账号待核对`
+        : `采集已完成，${processed.size} 个账号的结果可导出`);
+  }
+  // Keep the denominator tied to the retained run when a new input is loaded.
+  // The selected-file summary above independently describes the next run.
+  $('progressBar').max = total || 1;
+  $('progressBar').value = processed.size;
+  $('progressBar').setAttribute('aria-valuetext', `${processed.size} / ${total} 个账号已处理${stopped ? '，采集已停止' : ''}`);
+  const currentStep = busy ? 'workflowCollect' : results.length ? 'workflowExport' : 'workflowSetup';
+  const stepIds = ['workflowSetup', 'workflowCollect', 'workflowExport'];
+  for (const [index, id] of stepIds.entries()) {
+    const element = $(id);
+    if (!element) continue;
+    element.dataset.status = id === 'workflowCollect' && ['review', 'stopped'].includes(state) ? 'review'
+      : index < stepIds.indexOf(currentStep) ? 'complete' : id === currentStep ? 'current' : 'pending';
+    if (id === currentStep) element.setAttribute('aria-current', 'step');
+    else element.removeAttribute('aria-current');
+  }
+}
 
 function renderResults() {
   const s = summarize(results);
@@ -231,8 +380,9 @@ function applySheet() {
   if (!accounts.length && !warnings.length) warnings.push('这张表还没有填写主页链接。请填好账号后保存，再重新导入。');
   $('warnings').replaceChildren(); warnings.forEach(warn);
   $('fileInfo').textContent = `${inputName || '账号文件'}：读取到 ${accounts.length} 个可识别账号。`;
-  $('progressText').textContent = `已载入 ${accounts.length} 个账号，按所选平台采集`;
+  if (!results.length) setPhase(`已载入 ${accounts.length} 个账号，按所选平台采集`);
   recordEvent('input.loaded', {stage: 'import', accountCount: accounts.length, warningCount: warnings.length});
+  renderControls();
 }
 
 async function refreshTabs() {
@@ -281,6 +431,7 @@ async function startJob() {
   const tabId = Number($('tabSelect').value), apiKey = $('youtubeKey').value.trim();
   if (hasIG && (!$('tabSelect').value || !Number.isInteger(tabId))) throw new Error('请先选择已登录的 Instagram 标签页');
   if (hasYT && !apiKey) { $('youtubeSection').open = true; throw new Error('请在 YouTube API 密钥中填写你自己的 API Key'); }
+  await preferences.flush();
   await navigator.locks.request('social-metrics-collection', {ifAvailable: true}, async lock => {
     if (!lock) throw new Error('另一个插件工作页正在采集，请回到该页面查看或停止');
     await flushDiagnostics();
@@ -338,7 +489,7 @@ async function startJob() {
           if (failure && !wasSkipped(failure) && failure.error_code !== 'CANCELLED') presentProblem({code: failure.error_code, title: failure.error_title,
             message: '有账号尚未完成采集。请下载 Excel，在“待人工核对”中查看原因；已读到的帖子会保留。', action: failure.error_action}, failure.error_id);
           $('progressBar').value = event.index;
-          setPhase(`${event.index} / ${event.total} 个账号已处理${event.pending[0] ? `；接下来：${event.pending[0].name}` : ''}`);
+          setPhase(`已整理 ${event.index} / ${event.total} 个账号的结果${event.pending[0] ? `；接下来：${event.pending[0].name}` : ''}`);
           renderResults();
           await saveSnapshot({results, pending: event.pending, options, meta, running: true});
           activeAccount = null;
@@ -404,8 +555,11 @@ $('sampleButton').addEventListener('click', guard(() => {
   warnings = []; inputName = '内置单账号示例';
   recordEvent('input.sample_selected', {stage: 'import', platform: 'instagram', accountCount: 1});
   $('inputFile').value = ''; $('sheetField').hidden = true; $('platformSelect').value = 'instagram';
+  settingChanged('platformSelect');
   $('fileInfo').textContent = '已选择示例账号 @team_foxer（1 个 Instagram 账号）。';
-  $('warnings').replaceChildren(); $('progressText').textContent = '示例已就绪，选择登录标签页后开始'; renderControls();
+  $('warnings').replaceChildren();
+  if (!results.length) setPhase('示例已就绪，选择登录标签页后开始');
+  renderControls();
 }));
 $('refreshTabs').addEventListener('click', guard(refreshTabs, 'tabs'));
 ['platformSelect', 'scanMode'].forEach(id => $(id).addEventListener('change', renderControls));
@@ -413,6 +567,22 @@ for (const id of dateFields) $(id).addEventListener('input', () => {
   editedDateFields.add(id);
   if (id === 'timeZone') updateDateDefaults();
   renderControls();
+});
+for (const id of PREFERENCE_FIELDS) {
+  const element = $(id);
+  element.addEventListener(element.tagName === 'SELECT' ? 'change' : 'input', () => settingChanged(id));
+}
+$('youtubeKey').addEventListener('input', () => {
+  diagnostics.addSecret($('youtubeKey').value);
+  void savePreferences({youtubeKey: $('youtubeKey').value});
+});
+$('rememberYoutubeKey').addEventListener('change', () => {
+  void savePreferences({rememberYoutubeKey: $('rememberYoutubeKey').checked, youtubeKey: $('youtubeKey').value});
+});
+$('clearYoutubeKey').addEventListener('click', () => {
+  diagnostics.addSecret($('youtubeKey').value);
+  $('youtubeKey').value = ''; $('rememberYoutubeKey').checked = false;
+  void savePreferences({rememberYoutubeKey: false, youtubeKey: ''});
 });
 $('startButton').addEventListener('click', guard(startJob, 'start'));
 $('stopButton').addEventListener('click', () => {
@@ -498,6 +668,12 @@ async function init() {
   loading = true;
   try {
     updateDateDefaults();
+    renderControls();
+    let savedPreferences;
+    if (extension) {
+      try { savedPreferences = await preferences.load(); restorePreferences(savedPreferences); }
+      catch { preferenceFailure(true); }
+    }
     if (extension && navigator.locks) {
       // A second open tab must not convert the first tab's active task to interrupted.
       await navigator.locks.request('social-metrics-collection', {ifAvailable: true}, async lock => {
@@ -521,7 +697,7 @@ async function init() {
         } catch (error) { showError(error, 'storage'); }
         if (saved?.results) {
           results = saved.results; meta = saved.meta || {};
-          restoreDateOptions(saved.options);
+          restoreDateOptions({...saved.options, ...savedPreferences?.settings});
           if (saved.running) {
             recordEvent('run.recovered_interrupted', {stage: 'restore', pendingCount: saved.pending?.length || 0}, 'warning');
             results.push(...(saved.pending || []).map(a => failedRow(a, saved.options,

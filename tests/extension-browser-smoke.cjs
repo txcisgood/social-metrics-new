@@ -531,6 +531,28 @@ async function localFixtureProxy(directory, handler) {
     await page.locator('#startButton').click();
     await page.waitForFunction(() => document.querySelector('#requestCount').textContent === '1');
     await waitForHeldRequest(requestHeld);
+    // Appearance and explanations remain usable while a real collector is
+    // waiting on the local fixture, without restarting or changing its options.
+    const runningBeforeAppearance = await page.evaluate(async () => (await chrome.storage.session.get('lastRun')).lastRun);
+    await page.locator('#themeMode').selectOption('light');
+    await page.locator('#interfaceStyle').selectOption('classic');
+    assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
+    assert.equal(await page.locator('body').getAttribute('data-state'), 'running');
+    assert.equal(await page.locator('#maxPages').isDisabled(), true);
+    const advanced = page.getByText('高级设置', {exact: true});
+    if (!await advanced.evaluate(element => element.parentElement.open)) await advanced.click();
+    const runningHelp = page.locator('[aria-controls="maxPagesExplanation"]');
+    assert.equal(await runningHelp.isEnabled(), true);
+    await runningHelp.click();
+    await page.locator('#maxPagesExplanation').waitFor({state: 'visible'});
+    await page.keyboard.press('Escape');
+    const runningAfterAppearance = await page.evaluate(async () => (await chrome.storage.session.get('lastRun')).lastRun);
+    assert.deepEqual(runningAfterAppearance.options, runningBeforeAppearance.options);
+    assert.deepEqual(runningAfterAppearance.results, runningBeforeAppearance.results);
+    assert.equal(runningAfterAppearance.running, true);
+    assert.equal(await page.locator('#requestCount').textContent(), '1');
+    await page.locator('#interfaceStyle').selectOption('tech');
+    await page.locator('#themeMode').selectOption('dark');
     const second = await context.newPage();
     await second.goto(`chrome-extension://${id}/index.html`);
     await second.locator('#warnings').getByText(/另一个工作页正在采集/).waitFor();

@@ -311,7 +311,8 @@ export function createResultsWorkbook(results, meta = {}) {
     const note = result.status === "FAILED" && result.error ? result.error : extra["备注"] || extra["提示"] || result.note || "";
     rows.push([
       result.row_no, result.account_name, PLATFORM_TEXT[result.platform] || result.platform,
-      result.profile_url, result.target_date, STATUS_TEXT[result.status] || result.status,
+      result.profile_url, result.target_date, result.status === "FAILED" && result.error_code === "PAGE_INCOMPLETE"
+        ? "待核对" : STATUS_TEXT[result.status] || result.status,
       result.post_title, result.post_url, result.published_local, result.post_type, extra["时长"],
       result.follower_count, result.view_count, result.like_count, result.comment_count, result.fetched_at, note,
     ]);

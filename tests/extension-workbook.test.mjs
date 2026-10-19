@@ -191,6 +191,22 @@ test("empty exports keep all three sheets and results headers", () => {
   assert.equal(wb.Sheets["采集结果"].A1.v, "行号");
 });
 
+test("incomplete coverage exports as review needed while retaining posts and actual failures", () => {
+  const account = {row_no: 2, name: "Creator", platform: "instagram", url: "https://www.instagram.com/creator/"};
+  const options = {targetDates: ["2026-10-19"]};
+  const incomplete = failedRow(account, options, Object.assign(new Error("未查全"), {code: "PAGE_INCOMPLETE", stopReason: "no_progress"}));
+  const failure = failedRow({...account, row_no: 3}, options, Object.assign(new Error("暂时限制"), {code: "RATE_LIMIT"}));
+  const rows = [{...incomplete, status: "OK", error: "", post_url: "https://www.instagram.com/p/KNOWN/"}, incomplete, failure];
+  const actual = XLSX.read(XLSX.write(createResultsWorkbook(rows), {type: "array", bookType: "xlsx"}), {type: "array"});
+  assert.equal(actual.Sheets["采集结果"].F2.v, "有");
+  assert.equal(actual.Sheets["采集结果"].F3.v, "待核对");
+  assert.equal(actual.Sheets["采集结果"].F4.v, "抓取失败");
+  assert.equal(actual.Sheets["采集结果"].H2.v, rows[0].post_url);
+  assert.equal(actual.Sheets["待人工核对"].E2.v, incomplete.error);
+  assert.equal(actual.Sheets["待人工核对"].E3.v, failure.error);
+  assert.equal(incomplete.status, "FAILED", "Export labeling must not change coverage accounting");
+});
+
 test("summary uses platform and source row identity, including partial failures", () => {
   const results = [
     { row_no: 2, account_name: "same", platform: "instagram", status: "OK" },
