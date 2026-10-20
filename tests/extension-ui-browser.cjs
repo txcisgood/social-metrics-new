@@ -301,21 +301,33 @@ const reviewRows = [
     await page.mouse.move(1, 1);
     await popover.waitFor({state: 'hidden'});
 
-    // Keyboard users receive the same help, and Escape dismisses it without
-    // moving focus away from the button they reached.
+    // Real keyboard navigation distinguishes keyboard focus from the focus
+    // left behind by a mouse click, which must not pin the explanation.
     await trigger.focus();
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Shift+Tab');
     await popover.waitFor({state: 'visible'});
+    await page.mouse.move(1, 1);
+    await page.waitForTimeout(300);
+    assert.equal(await popover.isVisible(), true, `${label}: keyboard focus keeps help available`);
     await page.keyboard.press('Escape');
     await popover.waitFor({state: 'hidden'});
     assert.equal(await trigger.evaluate(element => element === document.activeElement), true);
 
-    // A click pins the explanation for touch users and users who want to read
-    // it slowly. Another click, an outside click, and Escape each dismiss it.
+    // A mouse click may leave focus on the button, but moving away still
+    // dismisses the explanation. The pointer can also move onto its text.
     await page.locator('h1').click();
     await trigger.click();
-    await page.mouse.move(1, 1);
     await popover.waitFor({state: 'visible'});
+    assert.equal(await trigger.evaluate(element => element === document.activeElement), true);
+    await page.mouse.move(1, 1);
+    await popover.waitFor({state: 'hidden'});
     await trigger.click();
+    await popover.waitFor({state: 'visible'});
+    await popover.hover();
+    await page.waitForTimeout(300);
+    assert.equal(await popover.isVisible(), true, `${label}: clicked help remains readable while hovered`);
+    await page.mouse.move(1, 1);
     await popover.waitFor({state: 'hidden'});
     await trigger.click();
     await popover.waitFor({state: 'visible'});
@@ -325,6 +337,109 @@ const reviewRows = [
     await popover.waitFor({state: 'visible'});
     await page.keyboard.press('Escape');
     await popover.waitFor({state: 'hidden'});
+  }
+
+  async function verifyHelpTransitions() {
+    const triggers = page.locator('[data-help-trigger]'), first = triggers.first(), second = triggers.nth(1);
+    const firstId = await first.getAttribute('aria-controls'), secondId = await second.getAttribute('aria-controls');
+    const firstPanel = page.locator(`#${firstId}`), secondPanel = page.locator(`#${secondId}`);
+    await page.locator('h1').click();
+    await first.hover();
+    await firstPanel.waitFor({state: 'visible'});
+    const size = await first.evaluate(element => {
+      const circle = getComputedStyle(element, '::before');
+      return {hit: element.getBoundingClientRect().width, circle: parseFloat(circle.width), font: parseFloat(getComputedStyle(element).fontSize)};
+    });
+    assert.ok(size.hit >= 24 && size.circle <= 16 && size.font <= 12,
+      'The smaller info glyph must retain its usable hit target');
+    assert.match(await firstPanel.evaluate(element => getComputedStyle(element).animationName), /help-appear/);
+    assert.ok(await firstPanel.evaluate(element => getComputedStyle(element).animationDuration.split(',').some(value => parseFloat(value) > 0)));
+    const bounds = await firstPanel.boundingBox();
+    await page.mouse.move(1, 1);
+    await page.waitForFunction(id => document.getElementById(id).classList.contains('is-closing'), firstId);
+    await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 25);
+    await page.waitForFunction(id => !document.getElementById(id).classList.contains('is-closing'), firstId);
+    await page.waitForTimeout(300);
+    assert.equal(await firstPanel.isVisible(), true, 'Reentering during fade-out must cancel the pending close');
+
+    await page.mouse.move(1, 1);
+    await second.hover();
+    await secondPanel.waitFor({state: 'visible'});
+    await firstPanel.waitFor({state: 'hidden'});
+    await page.waitForTimeout(300);
+    assert.equal(await secondPanel.isVisible(), true, 'An old close timer must not dismiss a newly hovered explanation');
+    assert.equal(await page.locator('.setting-help-popover:popover-open').count(), 1);
+    await page.keyboard.press('Escape');
+
+    await page.emulateMedia({reducedMotion: 'reduce'});
+    await first.hover();
+    await firstPanel.waitFor({state: 'visible'});
+    const reduced = await firstPanel.evaluate(element => {
+      const style = getComputedStyle(element);
+      return {animation: style.animationDuration, transition: style.transitionDuration};
+    });
+    assert.ok([reduced.animation, reduced.transition].every(value => value.split(',').every(duration => parseFloat(duration) === 0)),
+      'Reduced-motion preferences must suppress the tooltip animation');
+    await page.mouse.move(1, 1);
+    await firstPanel.waitFor({state: 'hidden'});
+    await page.emulateMedia({reducedMotion: 'no-preference'});
+  }
+
+  async function verifyTouchHelp() {
+    // CDP dispatches trusted touch/pointer events in this disposable profile;
+    // it does not alter the user's browser or merely call a JavaScript handler.
+    const cdp = await context.newCDPSession(page);
+    const trigger = page.locator('[data-help-trigger]').first();
+    const popover = page.locator(`#${await trigger.getAttribute('aria-controls')}`);
+    const tap = async (x, y) => {
+      await cdp.send('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: [{x, y}]});
+      await cdp.send('Input.dispatchTouchEvent', {type: 'touchEnd', touchPoints: []});
+    };
+    try {
+      await cdp.send('Emulation.setTouchEmulationEnabled', {enabled: true, maxTouchPoints: 1});
+      await trigger.scrollIntoViewIfNeeded();
+      await painted();
+      const bounds = await trigger.boundingBox(), x = bounds.x + bounds.width / 2, y = bounds.y + bounds.height / 2;
+      await tap(x, y);
+      await popover.waitFor({state: 'visible'});
+      await page.waitForTimeout(350);
+      assert.equal(await popover.isVisible(), true, 'Touch help must remain available after the finger leaves');
+      await tap(x, y);
+      await popover.waitFor({state: 'hidden'});
+      await tap(x, y);
+      await popover.waitFor({state: 'visible'});
+      await tap(2, 2);
+      await popover.waitFor({state: 'hidden'});
+    } finally {
+      await cdp.send('Emulation.setTouchEmulationEnabled', {enabled: false});
+      await cdp.detach();
+    }
+  }
+
+  async function verifyIcons() {
+    const iconState = await page.evaluate(async () => {
+      const manifest = chrome.runtime.getManifest();
+      const dimensions = async entries => Promise.all(Object.entries(entries).map(async ([size, path]) => {
+        const image = new Image();
+        image.src = chrome.runtime.getURL(path);
+        await image.decode();
+        return {size: Number(size), width: image.naturalWidth, height: image.naturalHeight};
+      }));
+      const brand = document.querySelector('.brand-mark');
+      await brand.decode();
+      const favicon = new Image();
+      favicon.src = document.querySelector('link[rel="icon"]').href;
+      await favicon.decode();
+      return {extension: await dimensions(manifest.icons), action: await dimensions(manifest.action.default_icon),
+        brand: {width: brand.naturalWidth, height: brand.naturalHeight}, favicon: favicon.naturalWidth};
+    });
+    assert.deepEqual(iconState.extension.map(icon => icon.size).sort((a, b) => a - b), [16, 32, 48, 128]);
+    assert.ok(iconState.action.length > 0);
+    for (const icon of [...iconState.extension, ...iconState.action]) {
+      assert.equal(icon.width, icon.size); assert.equal(icon.height, icon.size);
+    }
+    assert.ok(iconState.brand.width > 0 && iconState.brand.height > 0);
+    assert.equal(iconState.favicon, 32);
   }
 
   async function restoreRun(rows) {
@@ -360,6 +475,7 @@ const reviewRows = [
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(`chrome-extension://${new URL(worker.url()).host}/index.html`);
     await initialized();
+    await verifyIcons();
 
     // The default screen is usable, with no result table or invented numbers.
     assert.equal(await page.locator('body').getAttribute('data-state'), 'idle');
@@ -519,6 +635,8 @@ const reviewRows = [
     const helpCount = await page.locator('[data-help-trigger]').count();
     assert.ok(helpCount >= 4, 'Each advanced setting needs its own explanation');
     for (let index = 0; index < helpCount; index++) await verifyHelp(index, `Desktop help ${index + 1}`);
+    await verifyHelpTransitions();
+    await verifyTouchHelp();
     await page.getByText('高级设置', {exact: true}).click();
     await page.locator('.settings-scroll').evaluate(element => { element.scrollTop = 0; });
 
@@ -553,10 +671,11 @@ const reviewRows = [
       await verifyHelp(0, `Mobile ${style} first help`);
       await verifyHelp(helpCount - 1, `Mobile ${style} last help`);
       const lastTrigger = page.locator('[data-help-trigger]').last();
-      await lastTrigger.click();
+      await page.locator('h1').click();
+      await lastTrigger.hover();
       const popover = page.locator(`#${await lastTrigger.getAttribute('aria-controls')}`);
       await popover.waitFor({state: 'visible'});
-      await assertHelpWithinViewport(popover, `Mobile ${style} pinned help`);
+      await assertHelpWithinViewport(popover, `Mobile ${style} hover help`);
       await painted();
       await page.screenshot({path: path.join(previewDirectory, `${browserLabel}-mobile-320-${style}-help.png`),
         fullPage: false, animations: 'disabled'});
@@ -575,7 +694,7 @@ const reviewRows = [
     assert.match(await page.locator('#progressBar').getAttribute('aria-valuetext'), /采集已停止/);
     assert.deepEqual(errors, []);
     assert.deepEqual(externalRequests, [], 'UI rendering and local fixtures must not contact any remote service');
-    console.log(`PASS ${context.browser().version()}: themed selects with mouse/keyboard/typeahead/dynamic options, six appearance combinations, system color changes and reload persistence, accessible hover/focus/click help, fixed desktop actions, 390/320px layout, preserved deduplicated results, and zero collection/network requests. Previews: ${previewDirectory}`);
+    console.log(`PASS ${context.browser().version()}: themed selects, six persisted appearance combinations, animated help with mouse exit/keyboard/touch/reentry/reduced motion, decoded extension/action/header/favicon icons, 390/320px layout, preserved results, and zero collection/network requests. Previews: ${previewDirectory}`);
   } catch (error) {
     if (page && !page.isClosed()) await screenshot('failure').catch(() => {});
     throw error;

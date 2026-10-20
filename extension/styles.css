@@ -15,8 +15,6 @@
   --warn: #f1c17a;
   --bad: #ff9fac;
   --white: #fff;
-  --brand-line: #6882ba;
-  --brand-bg: #24375b;
   --instagram: #e8a2c9;
   --youtube: #ee9c9e;
   --line-strong: #425779;
@@ -65,8 +63,6 @@
   --good: #256d53;
   --warn: #80551f;
   --bad: #a02e40;
-  --brand-line: #b2c1e1;
-  --brand-bg: #e3ebfc;
   --instagram: #a63879;
   --youtube: #b9313d;
   --line-strong: #b8c7de;
@@ -123,11 +119,7 @@ h1, h2, h3 { font-weight: 600; text-wrap: balance; scroll-margin-top: 24px; }
 .app-header { height: 76px; padding: 0 36px; display: flex; align-items: center; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--line); }
 .brand, .brand-copy { display: flex; align-items: center; }
 .brand { gap: 12px; flex-shrink: 0; }
-.brand-mark { width: 36px; height: 36px; border: 1px solid var(--brand-line); border-radius: 10px; display: flex; align-items: flex-end; justify-content: center; gap: 3px; padding: 8px; background: var(--brand-bg); }
-.brand-mark span { width: 4px; border-radius: 2px; background: var(--accent-hover); }
-.brand-mark span:nth-child(1) { height: 9px; }
-.brand-mark span:nth-child(2) { height: 18px; }
-.brand-mark span:nth-child(3) { height: 13px; }
+.brand-mark { display: block; width: 36px; height: 36px; flex: 0 0 auto; }
 .brand-copy { gap: 16px; }
 .brand-name { font-size: 20px; font-weight: 650; letter-spacing: -.6px; }
 .brand-description { font-size: 12px; color: var(--muted); padding-left: 16px; border-left: 1px solid var(--line); }
@@ -338,19 +330,24 @@ select.select-native { position: absolute !important; width: 1px !important; hei
 :root[data-style="classic"] .select-trigger { border-radius: 6px; }
 :root[data-style="classic"] .select-popover { border-radius: 7px; }
 .header-links { margin-right: 10px; gap: 22px; }
-.label-with-help { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
+.label-with-help { display: flex; align-items: center; gap: 3px; margin-bottom: 7px; }
 .label-with-help label, .label-with-help .field-label { margin: 0; font-size: 13px; color: var(--label); font-weight: 500; }
-.help-button { display: inline-grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px; padding: 0; border: 1px solid var(--control-line); border-radius: 50%; color: var(--muted); background: var(--field); font: 600 14px/1 Georgia, serif; }
-.help-button:hover, .help-button[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.help-button { position: relative; isolation: isolate; display: inline-grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; color: var(--muted); background: transparent; font: 600 11px/1 Georgia, serif; transition: color 140ms ease; }
+/* Keep the hit area comfortable while the visible circle stays secondary. */
+.help-button::before { content: ""; position: absolute; z-index: -1; inset: 4px; border: 1px solid var(--control-hover); border-radius: 50%; background: var(--field); pointer-events: none; transition: border-color 140ms ease, background-color 140ms ease, transform 140ms ease; }
+.help-button:hover, .help-button[aria-expanded="true"] { color: var(--accent); }
+.help-button:hover::before, .help-button[aria-expanded="true"]::before { border-color: var(--accent); background: var(--accent-soft); transform: scale(1.08); }
 .setting-help-popover { position: fixed; inset: auto; margin: 0; width: 340px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow: auto; padding: 18px; border: 1px solid var(--control-hover); border-radius: 10px; background: var(--panel); color: var(--ink); box-shadow: 0 12px 40px #0003; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+.setting-help-popover:popover-open { animation: help-appear 140ms ease-out; }
+.setting-help-popover.is-closing:popover-open { animation: help-disappear 120ms ease-in forwards; }
+@keyframes help-appear { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes help-disappear { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(2px); } }
 .setting-help-title { display: block; font-size: 14px; font-weight: 600; margin-bottom: 9px; }
 .setting-help-popover p + p { margin-top: 10px; }
 .setting-help-popover .setting-help-hint { padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 /* The classic view recalls the original plain sidebar and compact reports. */
 :root[data-style="classic"] .app-shell { max-width: 1920px; }
 :root[data-style="classic"] .app-header { background: var(--panel); }
-:root[data-style="classic"] .brand-mark { background: transparent; border: 0; border-radius: 0; }
-:root[data-style="classic"] .brand-mark span { background: var(--accent); }
 :root[data-style="classic"] .page-heading { padding: 18px 30px; }
 :root[data-style="classic"] .page-heading h1 { font-size: 23px; }
 :root[data-style="classic"] .heading-dot { display: none; }
@@ -421,7 +418,7 @@ select.select-native { position: absolute !important; width: 1px !important; hei
 @media (max-width: 540px) {
   .app-header { padding-inline: 18px; gap: 14px; }
   .brand-name { font-size: 17px; }
-  .brand-mark { width: 32px; height: 32px; border-radius: 8px; padding: 6px; }
+  .brand-mark { width: 32px; height: 32px; }
   .header-links { gap: 0; margin: 0; }
   .header-links a:first-child { display: none; }
   .header-links a { font-size: 12px; }
