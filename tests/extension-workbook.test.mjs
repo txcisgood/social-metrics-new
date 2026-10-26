@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import test from "node:test";
-import { createResultsWorkbook, createAccountsTemplate, accountTemplateLabel, loadAccounts, readWorkbook, summarize } from "../extension/lib/workbook.mjs";
+import { createResultsWorkbook, createVideoResultsWorkbook, createAccountsTemplate, accountTemplateLabel, loadAccounts, readWorkbook, summarize } from "../extension/lib/workbook.mjs";
 import { failedRow } from "../extension/lib/jobs.mjs";
 
 const require = createRequire(import.meta.url);
@@ -185,10 +185,45 @@ test("exported text stays literal and only valid HTTPS links are linked after XL
   assert.equal(actual.Sheets["采集结果"]["!autofilter"].ref, "A1:Q3");
 });
 
+const ORIGINAL_HEADERS = ["行号", "账号名", "平台", "主页链接", "目标日期", "期间有无发布", "作品标题",
+  "作品链接", "发布时间(本地)", "类型", "时长", "粉丝数", "播放", "点赞", "评论", "抓取时间", "备注"];
+for (const mode of ['instagram', 'youtube', 'mixed', 'channel', 'keyword']) {
+  test(`${mode} export retains the original headers, widths and sheets despite additional video fields`, () => {
+    const row = {row_no: 2, platform: mode === 'instagram' || mode === 'mixed' ? 'instagram' : 'youtube',
+      status: 'OK', post_title: '原标题', post_description: '额外简介', source_mode: mode,
+      channel_title: '频道', comments_status: 'PARTIAL', comments: [{id: 'comment', text: '评论'}]};
+    const rows = mode === 'mixed' ? [row, {...row, platform: 'youtube', row_no: 3}] : [row];
+    const meta = {采集模式: ({channel: '频道视频', keyword: '关键词搜索'})[mode] || '视频 URL（含评论）'};
+    const generated = createResultsWorkbook(rows, meta);
+    const actual = readWorkbook(XLSX.write(generated, {type: 'array', bookType: 'xlsx'}), 'original.xlsx');
+    assert.deepEqual(actual.SheetNames, ['采集结果', '待人工核对', '本次运行信息']);
+    assert.deepEqual(XLSX.utils.sheet_to_json(actual.Sheets['采集结果'], {header: 1})[0], ORIGINAL_HEADERS);
+    assert.deepEqual(generated.Sheets['采集结果']['!cols'].map(column => column.wch),
+      [6, 22, 11, 38, 28, 13, 46, 40, 19, 11, 9, 12, 11, 11, 11, 19, 45]);
+    assert.equal(actual.Sheets['采集结果']['!ref'], `A1:Q${rows.length + 1}`);
+    assert.equal(actual.Sheets['采集结果']['!autofilter'].ref, `A1:Q${rows.length + 1}`);
+    assert.equal(actual.Sheets['待人工核对']['!ref'], 'A1:F1');
+  });
+}
+
 test("empty exports keep all three sheets and results headers", () => {
   const wb = createResultsWorkbook([]);
   assert.deepEqual(wb.SheetNames, ["采集结果", "待人工核对", "本次运行信息"]);
   assert.equal(wb.Sheets["采集结果"].A1.v, "行号");
+});
+
+test('both export templates format YouTube durations in restored data while retaining the raw result and other platforms', () => {
+  const rows = [{row_no: 1, platform: 'youtube', status: 'OK', extra: {时长: 'PT16S'}},
+    {row_no: 2, platform: 'youtube', status: 'OK', extra: {时长: 'PT15M2S'}},
+    {row_no: 3, platform: 'instagram', status: 'OK', extra: {时长: 'PT16S'}}];
+  for (const create of [createResultsWorkbook, createVideoResultsWorkbook]) {
+    const wb = readWorkbook(XLSX.write(create(rows), {type: 'array', bookType: 'xlsx'}), 'durations.xlsx');
+    assert.equal(wb.Sheets['采集结果'].K2.v, '00:16');
+    assert.equal(wb.Sheets['采集结果'].K2.t, 's');
+    assert.equal(wb.Sheets['采集结果'].K3.v, '15:02');
+    assert.equal(wb.Sheets['采集结果'].K4.v, 'PT16S');
+  }
+  assert.equal(rows[0].extra.时长, 'PT16S');
 });
 
 test("incomplete coverage exports as review needed while retaining posts and actual failures", () => {

@@ -394,7 +394,7 @@ test('YouTube transport sends key only to Google with omitted credentials', asyn
 test('YouTube transport rejects unknown endpoints and missing keys before fetch', async t => {
   let calls = 0;
   globalValue(t, 'fetch', async () => { calls += 1; });
-  await assert.rejects(createYouTubeRequest('test-key')('search', {}), /不支持/);
+  await assert.rejects(createYouTubeRequest('test-key')('unknownEndpoint', {}), /不支持/);
   await assert.rejects(createYouTubeRequest(' ')('channels', {}), value => value.code === 'AUTH');
   assert.equal(calls, 0);
 });

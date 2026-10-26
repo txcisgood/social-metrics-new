@@ -130,6 +130,7 @@ const STORE = 'metrics.preferences.v1';
       const error = new Error('offline failure ' + secret);
       window.dispatchEvent(new ErrorEvent('error', {error, message: error.message}));
     }, KEY);
+    await page.locator('.activity-summary').click();
     await page.locator('#diagnosticsDetails').evaluate(element => { element.open = true; });
     await page.waitForFunction(() => document.querySelector('#diagnosticText').value.includes('operation.failed'));
     assert.ok(!(await page.locator('#diagnosticText').inputValue()).includes(KEY));

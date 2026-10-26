@@ -52,9 +52,10 @@ function observeRequest(request, emit, endpointName) {
 
 export function createYouTubeRequest(apiKey, {signal, onRequest = () => {}, onDiagnostic = () => {}} = {}) {
   const emit = diagnosticEmitter(onDiagnostic, 'youtube');
+  const endpoints = ['channels', 'playlistItems', 'videos', 'search', 'commentThreads', 'comments'];
   return observeRequest(async (observation, endpoint, params) => {
     checkCancelled(signal);
-    if (!['channels', 'playlistItems', 'videos'].includes(endpoint)) throw new Error('不支持的 YouTube 请求');
+    if (!endpoints.includes(endpoint)) throw new Error('不支持的 YouTube 请求');
     if (!apiKey.trim()) throw Object.assign(new Error('请填写 YouTube Data API Key'), {code: 'AUTH'});
     const url = new URL(`https://www.googleapis.com/youtube/v3/${endpoint}`);
     url.search = new URLSearchParams({...params, key: apiKey.trim()});
@@ -79,6 +80,12 @@ export function createYouTubeRequest(apiKey, {signal, onRequest = () => {}, onDi
         if (r.status === 429 || reasons.some(v => /quota|rateLimit|dailyLimit/i.test(v))) {
           throw Object.assign(new Error('YouTube 配额耗尽或限流，本轮停止该平台'), {code: 'RATE_LIMIT'});
         }
+        if (['commentThreads', 'comments'].includes(endpoint)) {
+          if (reasons.includes('commentsDisabled')) throw Object.assign(new Error('该视频已关闭评论'), {code: 'YT_COMMENTS_DISABLED'});
+          if (reasons.some(reason => ['forbidden', 'commentNotFound', 'videoNotFound', 'commentThreadNotFound'].includes(reason))) {
+            throw Object.assign(new Error('评论不可访问或已删除'), {code: 'YT_COMMENTS_UNAVAILABLE'});
+          }
+        }
         if ([400, 401, 403].includes(r.status)) {
           throw Object.assign(new Error(`YouTube API 请求被拒绝（HTTP ${r.status}），请核对密钥、API启用状态及密钥限制`), {code: 'AUTH'});
         }
@@ -93,5 +100,5 @@ export function createYouTubeRequest(apiKey, {signal, onRequest = () => {}, onDi
       // Never include a fetch URL, which contains the API key, in errors or logs.
       throw new Error('YouTube 网络或数据错误，请检查网络和密钥设置');
     } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
-  }, emit, endpoint => ['channels', 'playlistItems', 'videos'].includes(endpoint) ? endpoint : 'unknown');
+  }, emit, endpoint => endpoints.includes(endpoint) ? endpoint : 'unknown');
 }

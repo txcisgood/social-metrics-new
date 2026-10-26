@@ -73,12 +73,14 @@ async function savedResults(page) {
 }
 
 async function displayedDiagnostics(page) {
+  await page.locator('#troubleshooting').evaluate(element => { element.open = true; });
   await page.locator('#diagnosticsDetails').evaluate(element => { element.open = true; });
   await page.waitForFunction(() => document.querySelector('#diagnosticText').value.includes('"schemaVersion"'));
   return page.locator('#diagnosticText').inputValue();
 }
 
 async function downloadedDiagnostics(page) {
+  await page.locator('a[href="#troubleshooting"]').click();
   const downloading = page.waitForEvent('download');
   await page.locator('#downloadLogs').click();
   return fs.readFile(await (await downloading).path(), 'utf8');
@@ -233,18 +235,24 @@ async function localFixtureProxy(directory, handler) {
     assert.equal(requests.length, beforeTemplates, 'Template exports cannot initiate collection');
     await page.locator('#inputFile').setInputFiles({name: 'empty-template.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: instagramTemplate.bytes});
     await page.locator('#warnings').getByText(/还没有填写主页链接/).waitFor();
+    assert.equal(await page.locator('#filePicker').getAttribute('data-state'), 'review');
     instagramTemplate.wb.Sheets['账号清单'].B2 = {t: 's', v: 'https://www.instagram.com/team_foxer/'};
     await page.locator('#inputFile').setInputFiles({name: 'filled-template.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       buffer: Buffer.from(XLSX.write(instagramTemplate.wb, {type: 'buffer', bookType: 'xlsx'}))});
     await page.waitForFunction(() => document.querySelector('#fileInfo').textContent.includes('1 个可识别账号'));
-    assert.equal(await page.locator('#sheetSelect').inputValue(), '账号清单');
+    assert.equal(await page.locator('#sheetSelect, #sheetField').count(), 0);
     assert.equal(await page.locator('#warnings li').count(), 0);
+    assert.equal(await page.locator('#filePicker').getAttribute('data-state'), 'ready');
+    assert.equal(await page.locator('#filePickerTitle').textContent(), 'filled-template.xlsx');
+    assert.match(await page.locator('#filePickerDescription').textContent(), /已导入 1 个账号/);
+    assert.equal(await page.locator('#selectedFileIcon').isVisible(), true);
     await page.locator('#platformSelect').selectOption('instagram', {force: true});
     // The Instagram-only job must not request YouTube; the sentinel exercises
     // redaction if a later diagnostic happens to mention the entered key.
     await page.locator('#youtubeKey').evaluate((element, value) => { element.value = value; }, PRIVATE_KEY);
     await page.screenshot({path: path.join(os.tmpdir(), 'social-metrics-extension-empty.png'), fullPage: true});
     await page.locator('#sampleButton').click();
+    assert.equal(await page.locator('#filePicker').getAttribute('data-state'), 'empty');
     await page.waitForFunction(() => document.querySelector('#tabSelect').value !== '');
     // The form previews calendar ranges without reading Instagram. Defaults
     // follow the selected timezone; a real run below uses the selected month.
@@ -318,8 +326,13 @@ async function localFixtureProxy(directory, handler) {
     const downloadPromise = page.waitForEvent('download');
     await page.locator('#exportXlsx').click();
     const download = await downloadPromise;
+    assert.match(download.suggestedFilename(), /^社媒采集-Instagram-\d{4}-\d{2}-\d{2} \d{2}时\d{2}分\d{2}秒\.xlsx$/);
     const file = await download.path();
     const result = XLSX.read(await fs.readFile(file), {type: 'buffer'});
+    assert.deepEqual(result.SheetNames, ['采集结果', '待人工核对', '本次运行信息']);
+    assert.equal(result.Sheets['采集结果']['!ref'], 'A1:Q2');
+    assert.equal(result.Sheets['采集结果'].Q1.v, '备注');
+    assert.equal(result.Sheets['采集结果'].R1, undefined);
     assert.equal(result.Sheets['采集结果'].G2.t, 's');
     assert.equal(result.Sheets['采集结果'].G2.f, undefined);
     assert.equal(result.Sheets['采集结果'].N2.v, 88);
@@ -450,6 +463,7 @@ async function localFixtureProxy(directory, handler) {
     assert.match(await page.locator('#problemCode').textContent(), /IG_RATE_LIMIT/);
     assert.match(await page.locator('#problemTitle').textContent(), /Instagram 暂时限制采集/);
     assert.match(await page.locator('#problemAction').textContent(), /暂停|稍后|恢复/);
+    assert.equal(await page.locator('#troubleshooting').evaluate(element => element.open), false);
     assert.equal((await savedResults(page))[0].status, 'FAILED');
     assert.equal((await savedResults(page))[1].skipped, true);
     assert.match(await page.locator('#summaryText').textContent(), /其中 1 个因平台暂停未采集/);
@@ -562,6 +576,7 @@ async function localFixtureProxy(directory, handler) {
     await second.waitForFunction(() => document.querySelector('#problemCode').textContent.includes('TASK_RUNNING'));
     assert.match(await second.locator('#problemAction').textContent(), /正在运行的工作页/);
     const resultLockCode = await second.locator('#problemCode').textContent();
+    await second.locator('.activity-summary').click();
     await second.locator('#clearLogs').click();
     await second.waitForFunction(previous => {
       const code = document.querySelector('#problemCode').textContent;

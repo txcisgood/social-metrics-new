@@ -12,7 +12,8 @@ const ERROR_NAMES = new Set(['Error', 'TypeError', 'RangeError', 'ReferenceError
   'FetchError', 'RateLimitError', 'AuthError', 'BrowserError']);
 const STACK_MODULES = new Set(['app.mjs', 'bootstrap.js', 'background.mjs', 'lib/diagnostics.mjs',
   'lib/diagnostic-store.mjs', 'lib/errors.mjs', 'lib/transport.mjs', 'lib/jobs.mjs',
-  'lib/youtube.mjs', 'lib/workbook.mjs', 'lib/instagram-page.mjs', 'lib/instagram-page-reader.mjs',
+  'lib/youtube.mjs', 'lib/youtube-input.mjs', 'lib/youtube-collection.mjs', 'lib/youtube-comments.mjs', 'lib/youtube-comment-view.mjs', 'lib/youtube-search.mjs',
+  'lib/workbook.mjs', 'lib/format.mjs', 'lib/history.mjs', 'lib/history-view.mjs', 'lib/instagram-page.mjs', 'lib/instagram-page-reader.mjs',
   'lib/instagram-page-snapshot.mjs', 'lib/instagram-page-observer.mjs', 'vendor/xlsx.full.min.js']);
 const CONTAINERS = new Set(['error', 'errors', 'cause', 'details', 'options', 'settings', 'counts', 'summary', 'meta']);
 const ALLOWED_KEYS = new Set([

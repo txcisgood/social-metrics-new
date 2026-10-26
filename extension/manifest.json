@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Social Metrics · 社媒采集",
-  "version": "0.8.2",
-  "description": "在已登录的 Instagram 标签页读取账号动态，支持 YouTube Data API，导入账号表并导出 Excel。",
+  "version": "0.9.8",
+  "description": "采集 Instagram 动态及 YouTube 视频、频道、关键词结果；支持简介、评论回复与 Excel 导出。",
   "minimum_chrome_version": "120",
   "permissions": ["scripting", "storage"],
   "host_permissions": ["https://www.instagram.com/*", "https://www.googleapis.com/*"],

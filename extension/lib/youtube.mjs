@@ -16,7 +16,7 @@ export function videoType(details, live) {
   return seconds <= 180 ? '疑似 Shorts（需核对）' : '长视频';
 }
 
-async function resolveChannel(url, request) {
+export async function resolveChannel(url, request) {
   const u = new URL(url);
   if (!['www.youtube.com', 'youtube.com', 'm.youtube.com', 'youtu.be'].includes(u.hostname) || !['https:', 'http:'].includes(u.protocol)) {
     throw new Error('请使用 YouTube 频道主页或视频链接');
@@ -84,18 +84,32 @@ export async function collectYouTube(account, options, request) {
   const hits = [...posts.values()].filter(p => options.targetDates.includes(p.date)).sort((a, b) => Date.parse(b.published) - Date.parse(a.published));
   if (!hits.length) return [{...base, status: 'NO_POST', extra: {...base.extra, 提示: '已扫描公开上传列表，目标日期无公开发布'}}];
   const details = new Map();
-  for (let i = 0; i < hits.length; i += 50) {
-    const data = await request('videos', {part: 'snippet,statistics,contentDetails,liveStreamingDetails', id: hits.slice(i, i + 50).map(p => p.videoId).join(',')});
-    if (!Array.isArray(data.items)) throw new Error('YouTube 视频详情结构异常');
-    for (const item of data.items) details.set(item.id, item);
+  try {
+    for (let i = 0; i < hits.length; i += 50) {
+      const data = await request('videos', {part: 'snippet,statistics,contentDetails,liveStreamingDetails', id: hits.slice(i, i + 50).map(p => p.videoId).join(',')});
+      if (!Array.isArray(data.items)) throw new Error('YouTube 视频详情结构异常');
+      for (const item of data.items) details.set(item.id, item);
+    }
+  } catch (error) {
+    error.partialRows = hits.filter(p => details.has(p.videoId)).map(p => youTubeVideoRow(base, details.get(p.videoId), p, options));
+    throw error;
   }
   return hits.map(p => {
     const v = details.get(p.videoId), post_url = `https://www.youtube.com/watch?v=${p.videoId}`;
     if (!v) return {...base, post_url, status: 'FAILED', error: '视频详情不可用，可能已删除或转为私密，请手动核对'};
-    return {...base, status: 'OK', post_url, post_title: v.snippet?.title || p.title,
-      published_local: localTime(p.published, options.timeZone), published_utc: new Date(p.published).toISOString(),
-      post_type: videoType(v.contentDetails, v.liveStreamingDetails), view_count: number(v.statistics?.viewCount),
-      like_count: number(v.statistics?.likeCount), comment_count: number(v.statistics?.commentCount),
-      extra: {...base.extra, 时长: v.contentDetails?.duration || '', 备注: [base.extra.备注, '短视频类型仅按时长提示，需核对 Shorts'].filter(Boolean).join('；')}};
+    return youTubeVideoRow(base, v, p, options);
   });
+}
+
+export function youTubeVideoRow(base, video, fallback, options) {
+  const published = video.snippet?.publishedAt || fallback.published;
+  if (!Number.isFinite(Date.parse(published))) throw Object.assign(new Error('YouTube 发布时间无效'), {code: 'INVALID_DATA'});
+  return {...base, status: 'OK', video_id: video.id, post_url: `https://www.youtube.com/watch?v=${video.id}`,
+    post_title: video.snippet?.title || fallback.title || '', post_description: video.snippet?.description || '',
+    channel_id: video.snippet?.channelId || base.channel_id || '', channel_title: video.snippet?.channelTitle || '',
+    published_local: localTime(published, options.timeZone), published_utc: new Date(published).toISOString(),
+    post_type: videoType(video.contentDetails, video.liveStreamingDetails), view_count: number(video.statistics?.viewCount),
+    like_count: number(video.statistics?.likeCount), comment_count: number(video.statistics?.commentCount),
+    detail_status: '已完成',
+    extra: {...base.extra, 时长: video.contentDetails?.duration || '', 备注: [base.extra?.备注, '短视频类型仅按时长提示，需核对 Shorts'].filter(Boolean).join('；')}};
 }

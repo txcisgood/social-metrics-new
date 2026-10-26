@@ -14,10 +14,11 @@
     el('problemPanel').hidden = false;
     el('problemTitle').textContent = '插件没有加载完整';
     el('problemMessage').textContent = '采集功能还没有准备好，暂时无法开始任务。';
-    el('problemAction').textContent = '请在扩展管理页重新加载插件，再关闭并重新打开工作台。如果仍有问题，请复制下方诊断日志反馈。';
+    el('problemAction').textContent = '请在扩展管理页重新加载插件，再关闭并重新打开工作台。如果仍有问题，请展开“问题排查”复制诊断日志反馈。';
     el('problemCode').textContent = `问题编号：${code}`;
     el('diagnosticText').value = '插件启动诊断（不含账号和登录信息）\n' + JSON.stringify(fallback, null, 2);
-    globalThis.chrome?.storage?.local?.set({'metrics.bootError': fallback}).catch(() => {});
+    const key = document.body.dataset.module === 'youtube' ? 'metrics.youtubeBootError' : 'metrics.bootError';
+    globalThis.chrome?.storage?.local?.set({[key]: fallback}).catch(() => {});
   };
   const report = (error, stage) => {
     if (window.__metricsReportError) window.__metricsReportError(error, stage);
@@ -31,6 +32,9 @@
     event.preventDefault(); report(event.reason instanceof Error ? event.reason : new Error('未处理的异步操作异常'), 'runtime');
   });
   el('dismissProblem').addEventListener('click', () => { el('problemPanel').hidden = true; });
+  document.querySelector('a[href="#troubleshooting"]').addEventListener('click', () => {
+    el('troubleshooting').open = true;
+  });
   el('copyLogs').addEventListener('click', async () => {
     if (!fallback) return;
     try { await navigator.clipboard.writeText(el('diagnosticText').value); el('logFeedback').textContent = '诊断日志已复制，可以粘贴反馈。'; }

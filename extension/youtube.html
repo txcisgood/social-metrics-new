@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://www.googleapis.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#0d1424">
+    <title>YouTube 视频采集 · Social Metrics</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png">
+    <link rel="stylesheet" href="styles.css">
+    <script src="bootstrap.js" defer></script>
+    <script src="vendor/xlsx.full.min.js" defer></script>
+  </head>
+  <body data-state="idle" data-platform="youtube" data-module="youtube">
+    <a class="skip-link" href="#workspace">跳到采集进度与结果</a>
+    <div class="app-shell">
+      <header class="app-header">
+        <div class="brand">
+          <img class="brand-mark" src="icons/icon.svg" width="36" height="36" alt="" aria-hidden="true">
+          <div class="brand-copy">
+            <span class="brand-name">Social Metrics</span>
+            <span class="brand-description">内容数据助手</span>
+          </div>
+        </div>
+        <nav class="header-links" aria-label="工作台导航"><a href="#workspace">采集工作台</a><a href="#troubleshooting">问题排查</a></nav>
+        <div class="appearance-controls" role="group" aria-label="界面外观">
+          <div><label for="interfaceStyle">界面风格</label><select id="interfaceStyle" name="interfaceStyle"><option value="tech" selected>精致科技</option><option value="classic">经典简洁</option></select></div>
+          <div><label for="themeMode">颜色模式</label><select id="themeMode" name="themeMode"><option value="dark" selected>深色</option><option value="light">浅色</option><option value="system">跟随系统</option></select></div>
+        </div>
+      </header>
+
+      <nav class="module-nav" aria-label="采集模块">
+        <a id="moduleAccountsLink" href="index.html"><strong>账号主页采集</strong><span>用户主页 Excel · Instagram / YouTube</span></a>
+        <a id="moduleYouTubeLink" href="youtube.html" aria-current="page"><strong>YouTube 视频采集</strong><span>视频 URL / 频道 / 关键词 · 简介与评论</span></a>
+      </nav>
+
+      <div class="page-heading">
+        <div><h1>YouTube 视频采集<span class="heading-dot" aria-hidden="true"></span></h1><p>通过视频链接、频道主页或关键词采集视频，导出简介与评论。</p></div>
+        <div class="platform-badges" aria-label="支持的平台"><span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><path d="M17.5 6.5h.01"/></svg>Instagram</span><span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="4"/><path d="m10 9 5 3-5 3Z"/></svg>YouTube</span></div>
+      </div>
+
+      <div class="app-layout">
+        <aside class="settings-panel" aria-labelledby="settingsTitle">
+          <div class="settings-scroll">
+          <div class="panel-heading">
+            <div class="panel-title"><span class="section-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg></span><h2 id="settingsTitle">配置采集任务</h2></div>
+            <p id="inputSummary" class="input-summary">等待填写采集目标</p>
+            <p id="preferencesFeedback" class="field-help" role="status" aria-live="polite">平台、日期和高级设置会自动保存在当前浏览器。</p>
+          </div>
+
+          <section class="settings-section" aria-labelledby="inputTitle">
+            <div class="section-heading">
+              <h3 id="inputTitle">平台与账号</h3>
+              <button id="sampleButton" class="text-button" type="button">使用示例</button>
+            </div>
+            <div id="platformField" class="field">
+              <label for="platformSelect">采集平台</label>
+              <select id="platformSelect" name="platformSelect">
+                <option value="instagram">Instagram</option>
+                <option value="youtube" selected>YouTube</option>
+                <option value="all">Instagram 和 YouTube</option>
+              </select>
+            </div>
+            <div id="youtubeModes" hidden>
+              <div class="field"><label for="youtubeMode">YouTube 采集模式</label><select id="youtubeMode"><option value="channel">频道视频</option><option value="videos" selected>视频 URL（含评论）</option><option value="keyword">关键词搜索</option></select></div>
+              <div id="youtubeVideoInput" hidden>
+                <div class="field"><label for="videoInputSource">视频链接来源</label><select id="videoInputSource"><option value="text">粘贴视频链接</option><option value="file">上传视频表格</option></select></div>
+                <div class="comment-visibility field">
+                  <label class="comment-switch" for="showCommentDetails"><span>显示评论详情</span><input id="showCommentDetails" type="checkbox" role="switch" aria-controls="commentDetailsPanel" aria-describedby="commentVisibilityHelp" data-presentation-control><span class="comment-switch-track" aria-hidden="true"></span></label>
+                  <p id="commentVisibilityHelp" class="field-help">在下方查看用户名、评论和回复。关闭后仅隐藏页面明细，Excel 仍保留已采集评论。</p>
+                </div>
+                <div id="videoTextField" class="field"><label for="videoUrls">视频链接（每行一条）</label><textarea id="videoUrls" rows="5" spellcheck="false" placeholder="https://www.youtube.com/watch?v=…&#10;https://youtu.be/…" maxlength="100000"></textarea><p class="field-help">每轮最多 100 条，重复视频自动去重。只采指定视频，标题与简介分列，同时读取公开主评论和回复。</p></div>
+              </div>
+              <div id="youtubeChannelInput">
+                <div class="field"><label for="channelUrl">频道主页链接</label><input id="channelUrl" type="url" spellcheck="false" placeholder="https://www.youtube.com/@频道名" maxlength="2048"><p class="field-help">填写一个频道主页链接，批量读取该频道的视频。</p></div>
+                <div class="field"><label for="youtubeRange">频道视频范围</label><select id="youtubeRange"><option value="dates">指定日期范围</option><option value="all">全部公开视频</option></select></div>
+              </div>
+              <div id="youtubeKeywordInput" class="field" hidden>
+                <label for="youtubeKeyword">搜索关键词</label><input id="youtubeKeyword" type="text" maxlength="200" placeholder="输入一个关键词或短语">
+                <fieldset class="keyword-filters"><legend>搜索筛选</legend>
+                  <input id="youtubeSearchFilter" type="hidden" value="all">
+                  <div class="keyword-filter-buttons" role="group" aria-label="关键词搜索筛选">
+                    <button type="button" data-keyword-filter="all" aria-pressed="true">全部视频</button>
+                    <button type="button" data-keyword-filter="recent" aria-pressed="false">最近上传</button>
+                    <button type="button" data-keyword-filter="live" aria-pressed="false">直播</button>
+                  </div>
+                </fieldset>
+                <p id="keywordFilterHelp" class="field-help">按关键词相关度返回视频，不限制发布日期。</p>
+                <p class="field-help">搜索结果受 YouTube 索引影响，不保证全网查全。</p>
+              </div>
+              <div id="youtubeLimitField" class="field"><label for="youtubeLimit">本轮最多读取视频数</label><input id="youtubeLimit" type="number" min="1" max="100" step="1" value="100"><p class="field-help">可设置 1–100 条，默认 100；到达上限会标记部分完成。频道与关键词模式不采评论详情。</p></div>
+            </div>
+            <div id="tableInput">
+            <label id="filePicker" class="file-picker" for="inputFile">
+              <span class="upload-icon" aria-hidden="true"><svg id="uploadFileIcon" class="icon" viewBox="0 0 24 24"><path d="M12 15V3m-4 4 4-4 4 4M4 14v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></svg><svg id="selectedFileIcon" class="icon" viewBox="0 0 24 24" hidden><path d="M14 3H5v18h14V8ZM14 3v5h5M8 12h8m-8 4h8m-4-4v7"/></svg></span>
+              <span id="filePickerTitle" class="file-picker-title">选择用户主页表格</span>
+              <span id="filePickerDescription" class="file-picker-description">Excel、CSV 或 TSV · 最大 10 MB</span>
+              <span id="filePickerAction" class="file-picker-action" hidden>点击更换文件</span>
+              <input id="inputFile" name="inputFile" type="file" accept=".xlsx,.xlsm,.csv,.tsv" aria-describedby="fileInfo">
+            </label>
+            <p id="fileInfo" class="field-help" aria-live="polite">上传具体视频链接表格；可先下载视频 URL 模板，填写后导入。</p>
+            <div class="template-download">
+              <button id="downloadTemplate" class="button button-secondary" type="button" aria-describedby="templateHelp">下载 Instagram 模板</button>
+              <p id="templateHelp" class="field-help">在第一张工作表填写，保存后从上方导入。</p>
+              <p id="templateFeedback" class="field-help" role="status" aria-live="polite"></p>
+            </div>
+            </div>
+          </section>
+
+          <section id="instagramSection" class="settings-section" aria-labelledby="instagramTitle">
+            <div class="section-heading">
+              <h3 id="instagramTitle">连接 Instagram</h3>
+              <button id="refreshTabs" class="text-button" type="button">刷新标签页</button>
+            </div>
+            <label class="sr-only" for="tabSelect">已登录的 Instagram 标签页</label>
+            <select id="tabSelect" name="tabSelect" aria-describedby="tabStatus">
+              <option value="">请选择 Instagram 标签页</option>
+            </select>
+            <p id="tabStatus" class="field-help" role="status">先在当前浏览器中打开 Instagram 并登录，保持标签页开启。</p>
+          </section>
+
+          <section id="timeSection" class="settings-section" aria-labelledby="dateTitle">
+            <h3 id="dateTitle">时间范围</h3>
+            <div id="dateFilterFields">
+            <div class="field">
+              <label for="dateMode">日期范围</label>
+              <select id="dateMode" name="dateMode">
+                <option value="days" selected>最近几天（含今天）</option>
+                <option value="date">指定一天</option>
+                <option value="month">按月</option>
+                <option value="quarter">按季度</option>
+                <option value="range">自定义起止日期</option>
+              </select>
+            </div>
+            <div id="daysField" class="field">
+              <label for="days">天数</label>
+              <input id="days" name="days" type="number" value="7" min="1" max="366" step="1" inputmode="numeric" autocomplete="off">
+            </div>
+            <div id="dateField" class="field" hidden>
+              <label for="targetDate">目标日期</label>
+              <input id="targetDate" name="targetDate" type="date" autocomplete="off">
+            </div>
+            <div id="monthField" class="field" hidden>
+              <label for="targetMonth">月份</label>
+              <input id="targetMonth" name="targetMonth" type="month" autocomplete="off">
+            </div>
+            <div id="quarterField" hidden>
+              <div class="field">
+                <label for="quarterYear">年份</label>
+                <input id="quarterYear" name="quarterYear" type="number" min="1" max="9999" step="1" inputmode="numeric" autocomplete="off">
+              </div>
+              <div class="field">
+                <label for="quarter">季度</label>
+                <select id="quarter" name="quarter">
+                  <option value="1">第一季度 · 1 月 1 日至 3 月 31 日</option>
+                  <option value="2">第二季度 · 4 月 1 日至 6 月 30 日</option>
+                  <option value="3">第三季度 · 7 月 1 日至 9 月 30 日</option>
+                  <option value="4">第四季度 · 10 月 1 日至 12 月 31 日</option>
+                </select>
+              </div>
+            </div>
+            <div id="rangeField" hidden>
+              <div class="field">
+                <label for="startDate">开始日期（含当天）</label>
+                <input id="startDate" name="startDate" type="date" autocomplete="off">
+              </div>
+              <div class="field">
+                <label for="endDate">结束日期（含当天）</label>
+                <input id="endDate" name="endDate" type="date" autocomplete="off">
+              </div>
+              <p class="field-help">可跨月、跨年，每次最多选择 366 天。</p>
+            </div>
+            </div>
+            <div class="field">
+              <label for="timeZone">日期判定时区</label>
+              <select id="timeZone" name="timeZone">
+                <option value="Europe/London" selected>英国 · Europe/London</option>
+                <option value="Asia/Shanghai">中国 · Asia/Shanghai</option>
+                <option value="America/Los_Angeles">美国西部 · America/Los_Angeles</option>
+                <option value="UTC">协调世界时 · UTC</option>
+              </select>
+              <p class="field-help">按创作者所在时区判断帖子属于哪一天。</p>
+            </div>
+            <div id="datePreviewBox" class="date-preview" aria-live="polite" aria-atomic="true">
+              <p id="datePreview"></p>
+              <p id="datePreviewHint" class="field-help" hidden></p>
+            </div>
+          </section>
+
+          <details id="collectionAdvanced" class="settings-details">
+            <summary>高级设置</summary>
+            <div class="details-content">
+              <div id="scanModeField" class="field">
+                <div class="label-with-help"><label for="scanMode">Instagram 采集方式</label><button class="help-button" type="button" data-help-trigger aria-label="了解 Instagram 采集方式" aria-controls="scanModeExplanation" aria-describedby="scanModeExplanation" aria-expanded="false">i</button></div>
+                <div id="scanModeExplanation" class="setting-help-popover" popover="manual" role="tooltip">
+                  <strong class="setting-help-title">选择检查内容的深度</strong>
+                  <p>“按日期快速检查”优先寻找目标日期的帖子。如果一批内容按时间排列，末尾连续出现更早的帖子，就会停止向历史翻找，节省时间。</p>
+                  <p>这只是提速判断，不代表已经查全；无法确认的范围仍会标记“待核对”。“继续检查更多内容”会跳过这项提前停止判断，但仍受下方批次和帖子数上限影响。</p>
+                  <p class="setting-help-hint">默认快速检查；需要检查更久以前的内容时，可选继续检查更多内容。</p>
+                </div>
+                <select id="scanMode" name="scanMode"><option value="recent" selected>按日期快速检查</option><option value="complete">继续检查更多内容</option></select>
+                <p id="scanModeHelp" class="field-help">优先读取目标日期附近的帖子。更早的内容会尽快跳过，未能确认的范围会标记待核对。</p>
+              </div>
+              <div id="pageLimitField" class="field">
+                <div class="label-with-help"><label for="maxPages">每个账号最多读取批次 / 页数</label><button class="help-button" type="button" data-help-trigger aria-label="了解读取批次和页数上限" aria-controls="maxPagesExplanation" aria-describedby="maxPagesExplanation" aria-expanded="false">i</button></div>
+                <div id="maxPagesExplanation" class="setting-help-popover" popover="manual" role="tooltip">
+                  <strong class="setting-help-title">限制每个账号向后查多少</strong>
+                  <p>Instagram 首次读取主页算 1 批，之后每次向下滚动并读取再算 1 批；YouTube 按接口返回的分页计数。这不是帖子条数，也不是所有网络请求的总次数。</p>
+                  <p>数值越大，可能覆盖更多历史内容，也会更耗时。达到上限时会保留已经读取的结果；如果目标日期还未查全，会标记“待核对”。</p>
+                  <p class="setting-help-hint">默认 5，允许 1–50。先按默认值试跑，再根据报表中的待核对原因调整。</p>
+                </div>
+                <input id="maxPages" name="maxPages" type="number" value="5" min="1" max="50" step="1" inputmode="numeric" autocomplete="off">
+                <p class="field-help">Instagram 包含首次主页和向下滚动；YouTube 按分页计数。未查全会保留已读结果并标记待核对。</p>
+              </div>
+              <div id="instagramAdvanced">
+              <div class="field">
+                <div class="label-with-help"><label for="maxPosts">Instagram 每账号最多打开帖子数</label><button class="help-button" type="button" data-help-trigger aria-label="了解帖子详情访问上限" aria-controls="maxPostsExplanation" aria-describedby="maxPostsExplanation" aria-expanded="false">i</button></div>
+                <div id="maxPostsExplanation" class="setting-help-popover" popover="manual" role="tooltip">
+                  <strong class="setting-help-title">只为缺少的信息打开详情</strong>
+                  <p>主页没有提供发布日期，或目标日期内的帖子缺少点赞、评论、播放等指标时，才会打开详情补充。已知不在目标日期范围内的帖子不会为补指标再打开。</p>
+                  <p>这是每个账号的详情访问上限，不限制最终导出的帖子数。提高上限可能补充更多信息，但会增加页面操作和耗时；达到上限也不代表这个账号没有更多内容。</p>
+                  <p class="setting-help-hint">默认 40，允许 1–500。若报表提示仍有帖子日期无法确认，可适当提高。</p>
+                </div>
+                <input id="maxPosts" name="maxPosts" type="number" value="40" min="1" max="500" step="1" inputmode="numeric" autocomplete="off">
+                <p class="field-help">打开详情补充发布日期和指标。数量越大耗时越长；到达上限不等于没有更多帖子。</p>
+              </div>
+              <div class="field">
+                <div class="label-with-help"><span class="field-label" id="delayLabel">Instagram 页面操作间隔（秒）</span><button class="help-button" type="button" data-help-trigger aria-label="了解页面操作间隔" aria-controls="delayExplanation" aria-describedby="delayExplanation" aria-expanded="false">i</button></div>
+                <div id="delayExplanation" class="setting-help-popover" popover="manual" role="tooltip">
+                  <strong class="setting-help-title">控制页面操作之间的等待</strong>
+                  <p>打开主页、滚动主页和打开帖子前，会从最短到最长之间随机取一个间隔。页面已经花掉的加载和读取时间会抵扣等待，不会每次额外完整等一遍。</p>
+                  <p>操作按顺序完成，实际速度还取决于页面加载。缩短间隔不能保证固定采集速度，也不能保证避开访问限制；遇到限制或登录要求，会停止 Instagram 本轮采集。</p>
+                  <p class="setting-help-hint">默认 3–5 秒，最短不能低于 3 秒，最长不能小于最短。此设置不控制 YouTube API 请求。</p>
+                </div>
+                <div class="range-fields" role="group" aria-labelledby="delayLabel">
+                  <div><label for="minDelay">最短</label><input id="minDelay" name="minDelay" type="number" value="3" min="3" max="120" step="1" inputmode="numeric" autocomplete="off"></div>
+                  <span class="range-separator" aria-hidden="true">至</span>
+                  <div><label for="maxDelay">最长</label><input id="maxDelay" name="maxDelay" type="number" value="5" min="3" max="120" step="1" inputmode="numeric" autocomplete="off"></div>
+                </div>
+                <p class="field-help">页面提示限制访问或要求登录时，会停止 Instagram 本轮采集。</p>
+              </div>
+              </div>
+            </div>
+          </details>
+
+          <details id="youtubeSection" class="settings-details">
+            <summary>YouTube API 密钥</summary>
+            <div class="details-content">
+              <div class="field">
+                <label for="youtubeKey">YouTube Data API Key</label>
+                <input id="youtubeKey" name="youtubeKey" type="password" autocomplete="off" spellcheck="false" placeholder="仅采集 YouTube 时填写" aria-describedby="youtubeKeyHelp">
+                <p id="youtubeKeyHelp" class="field-help">密钥用于请求 YouTube，不写入采集结果或诊断日志。</p>
+                <label class="checkbox-label" for="rememberYoutubeKey"><input id="rememberYoutubeKey" name="rememberYoutubeKey" type="checkbox" checked autocomplete="off">在本机记住 API Key</label>
+                <p class="field-help">仅保存在当前浏览器的用户配置中，不通过浏览器账号同步。取消勾选会删除已保存的密钥。</p>
+                <button id="clearYoutubeKey" class="text-button" type="button">清除已保存密钥</button>
+                <p id="youtubeKeyFeedback" class="field-help" role="status" aria-live="polite">填写后自动保存在本机。</p>
+              </div>
+            </div>
+          </details>
+
+          </div>
+          <div class="run-controls">
+            <div class="run-buttons">
+              <button id="startButton" class="button button-primary" type="button" disabled><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 4 12 8-12 8Z"/></svg>开始采集</button>
+              <button id="stopButton" class="button button-stop" type="button" disabled>停止</button>
+            </div>
+            <p class="field-help">采集期间，请保持本模块工作台开启。</p>
+          </div>
+        </aside>
+
+        <main id="workspace" class="workspace" tabindex="-1">
+          <section class="workspace-top" aria-labelledby="resultsTitle">
+            <div>
+              <h2 id="resultsTitle">本次采集</h2>
+              <p class="workspace-description">进度清晰可见，已取得的内容都会保留。</p>
+            </div>
+            <span id="statusText" class="status-label" role="status">准备就绪</span>
+          </section>
+
+          <section class="progress-section" aria-label="采集进度">
+            <ol class="workflow" aria-label="采集流程">
+              <li id="workflowSetup" data-status="current" aria-current="step"><span class="workflow-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10Z"/><path d="M13 3v7h7M8 14h8m-8 3h5"/></svg></span><span>准备目标<small>导入与设置</small></span></li>
+              <li id="workflowCollect" data-status="pending"><span class="workflow-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M4 8a9 9 0 0 1 15-3l2 3M21 3v5h-5M20 16a9 9 0 0 1-15 3l-2-3M3 21v-5h5"/></svg></span><span>读取内容<small>采集公开数据</small></span></li>
+              <li id="workflowExport" data-status="pending"><span class="workflow-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg></span><span>导出报表<small>下载与核对</small></span></li>
+            </ol>
+            <div class="progress-body">
+            <div class="progress-heading">
+              <div><span id="progressStage" class="progress-stage">待开始</span><p id="progressText" aria-live="polite">等待准备采集目标</p></div>
+              <p class="elapsed-counter">已用时间<strong id="elapsedText">00:00</strong></p>
+            </div>
+            <div class="progress-labels"><p id="accountProgress" class="account-progress">当前目标：—</p><span id="progressPercent">0%</span></div>
+            <progress id="progressBar" value="0" max="100" aria-label="采集完成进度"></progress>
+            <p id="scanProgress" class="scan-progress">视频数量与评论读取进度将在采集时显示</p>
+            <dl class="metrics">
+              <div><dt>已读内容</dt><dd><span id="metricPosts">0</span><span class="metric-unit">条</span></dd><dd class="metric-note">已读取的视频数据</dd></div>
+              <div><dt id="metricAccountLabel">已处理账号</dt><dd><span id="metricAccounts">0</span><span class="metric-unit">个</span></dd><dd id="accountTotalHint" class="metric-note">等待准备采集目标</dd></div>
+              <div class="metric-review"><dt id="metricReviewLabel">待核对账号</dt><dd><span id="metricReview">0</span><span class="metric-unit">个</span></dd><dd class="metric-note">原因保留在导出报表中</dd></div>
+            </dl>
+            <div class="operation-counters"><span><i class="platform-dot instagram-dot" aria-hidden="true"></i>Instagram 页面操作 <strong id="igOperationCount">0</strong> 次</span><span><i class="platform-dot youtube-dot" aria-hidden="true"></i>YouTube API 请求 <strong id="ytRequestCount">0</strong> 次</span></div>
+            <p id="legacyCounter" class="operation-counters" hidden>上次记录合计 <span id="requestCount">0</span> 次操作（旧记录未区分平台）</p>
+            <p id="summaryText" class="summary-text" aria-live="polite">尚未开始采集</p>
+            </div>
+          </section>
+
+          <ul id="warnings" class="warnings" aria-live="polite" aria-label="需要注意的事项"></ul>
+          <section id="problemPanel" class="problem-panel" role="alert" hidden>
+            <div class="problem-heading"><h3 id="problemTitle"></h3><button id="dismissProblem" class="text-button" type="button">收起提示</button></div>
+            <p id="problemMessage"></p>
+            <p id="problemAction" class="problem-action"></p>
+            <p id="problemCode" class="problem-code"></p>
+          </section>
+
+          <section class="results-section export-panel" aria-labelledby="exportTitle">
+            <div class="export-heading">
+            <span class="report-icon" aria-hidden="true"><svg viewBox="0 0 56 64"><path d="M12 3h25l13 13v42a3 3 0 0 1-3 3H12a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3Z"/><path d="M37 3v13h13M18 28h23M18 36h23M18 44h23M26 28v16"/></svg></span>
+            <div class="results-toolbar">
+              <div>
+                <h3 id="exportTitle">你的内容报表，在这里</h3>
+                <p id="exportStatus" role="status">从一个账号开始。采集完成或停止后，可下载已取得的结果。</p>
+              </div>
+            </div>
+            </div>
+            <div class="export-actions" aria-label="结果操作">
+              <button id="exportXlsx" class="button button-primary button-export" type="button" disabled>下载 Excel 结果</button>
+              <button id="exportJson" class="button button-quiet" type="button" disabled>导出 JSON</button>
+              <button id="clearButton" class="button button-quiet" type="button">清空结果</button>
+            </div>
+            <p class="export-note">导出视频数据、待核对项和运行信息；视频 URL 模式另含评论详情。原始表格不会被修改。</p>
+          </section>
+
+          <details id="historyPanel" class="history-panel" aria-labelledby="historyTitle">
+            <summary class="history-summary"><span id="historyTitle">历史记录</span><span data-history-count>— / 5</span><span class="history-summary-hint">最近 5 次 · 保存在本机</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></summary>
+            <p class="history-help">保留本模块最近 5 次结果及已取得的评论。关闭浏览器后仍可下载；第 6 次会替换最早一条。</p>
+            <ol class="history-list" data-history-list><li class="history-empty">正在读取历史记录…</li></ol>
+          </details>
+          <p id="historyFeedback" class="history-feedback" role="status" hidden></p>
+
+          <section id="commentDetailsPanel" class="comment-details-panel" aria-labelledby="commentDetailsTitle" hidden>
+            <h3 id="commentDetailsTitle">评论详情</h3>
+            <p class="comment-details-help">按视频查看已取得的公开评论，每页 50 条。回复归属主评论；多级回复关系以 API 可提供的信息为限。</p>
+            <div data-comment-content></div>
+          </section>
+
+          <details id="troubleshooting" class="activity-section" aria-labelledby="activityTitle">
+            <summary class="activity-summary"><span id="activityTitle">问题排查</span><span class="activity-summary-hint">运行记录与诊断日志</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></summary>
+            <div class="activity-content">
+            <p class="diagnostic-help">遇到问题时，可复制或下载日志反馈。日志仅保存在本机，不包含密钥、Cookie 或帖子正文。</p>
+            <div class="diagnostic-toolbar">
+              <button id="copyLogs" class="button button-secondary" type="button">复制诊断日志</button>
+              <button id="downloadLogs" class="button button-quiet" type="button">下载诊断日志</button>
+              <button id="clearLogs" class="button button-quiet" type="button">清空诊断日志</button>
+              <span id="logFeedback" role="status" aria-live="polite"></span>
+            </div>
+            <ol id="logList" class="log-list" role="log" aria-live="polite" aria-relevant="additions text"><li class="log-placeholder">采集开始后，运行记录会显示在这里。</li></ol>
+            <details id="diagnosticsDetails" class="diagnostics-details">
+              <summary>查看可反馈的诊断日志</summary>
+              <label class="sr-only" for="diagnosticText">诊断日志，可手动全选复制</label>
+              <textarea id="diagnosticText" name="diagnosticText" readonly spellcheck="false"></textarea>
+            </details>
+            </div>
+          </details>
+          <footer class="workspace-footer">公开视频和评论的可访问范围以 YouTube API 返回为准，未完成内容会标为待核对。</footer>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>
