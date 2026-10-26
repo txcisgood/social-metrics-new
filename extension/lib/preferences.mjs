@@ -1,4 +1,5 @@
 import {APPEARANCE_CHOICES} from './appearance.mjs';
+import {KEYWORD_FILTERS} from './youtube-search.mjs';
 
 export const PREFERENCES_KEY = 'metrics.preferences.v1';
 
@@ -7,12 +8,15 @@ const choices = {
   dateMode: ['days', 'date', 'month', 'quarter', 'range'],
   timeZone: ['Europe/London', 'Asia/Shanghai', 'America/Los_Angeles', 'UTC'],
   scanMode: ['recent', 'complete'],
+  youtubeMode: ['channel', 'videos', 'keyword'], videoInputSource: ['text', 'file'], youtubeRange: ['dates', 'all'],
+  youtubeSearchFilter: Object.keys(KEYWORD_FILTERS),
   ...APPEARANCE_CHOICES,
 };
 const numbers = {days: [1, 366], quarterYear: [1, 9999], quarter: [1, 4], maxPages: [1, 50],
-  maxPosts: [1, 500], minDelay: [3, 120], maxDelay: [3, 120]};
+  maxPosts: [1, 500], minDelay: [3, 120], maxDelay: [3, 120], youtubeLimit: [1, 100]};
 const dates = ['targetDate', 'startDate', 'endDate'];
-export const PREFERENCE_FIELDS = [...Object.keys(choices), ...Object.keys(numbers), ...dates, 'targetMonth'];
+const booleans = ['showCommentDetails'];
+export const PREFERENCE_FIELDS = [...Object.keys(choices), ...Object.keys(numbers), ...dates, 'targetMonth', ...booleans];
 
 function validDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith('0000')) return false;
@@ -24,6 +28,7 @@ export function sanitizeSettings(value) {
   const clean = {};
   if (!value || typeof value !== 'object' || Array.isArray(value)) return clean;
   for (const [field, options] of Object.entries(choices)) if (options.includes(value[field])) clean[field] = value[field];
+  for (const field of booleans) if (typeof value[field] === 'boolean') clean[field] = value[field];
   for (const [field, [min, max]] of Object.entries(numbers)) {
     const number = value[field];
     if (typeof number === 'number' && Number.isFinite(number) && number >= min && number <= max &&
@@ -49,14 +54,22 @@ function normalize(value) {
   if (!value || value.schemaVersion !== 1 || Array.isArray(value)) return null;
   const rememberYoutubeKey = value.rememberYoutubeKey === undefined || value.rememberYoutubeKey === true;
   const key = rememberYoutubeKey ? cleanKey(value.youtubeKey) : '';
-  return {schemaVersion: 1, settings: sanitizeSettings(value.settings), rememberYoutubeKey, ...(key ? {youtubeKey: key} : {})};
+  return {schemaVersion: 1, settings: sanitizeSettings(value.settings),
+    ...(Object.hasOwn(value, 'youtubeSettings') ? {youtubeSettings: sanitizeSettings(value.youtubeSettings)} : {}),
+    rememberYoutubeKey, ...(key ? {youtubeKey: key} : {})};
 }
 
 // Only allowlisted configuration lives here. File contents, tab IDs, results and
 // diagnostics remain in their own stores. Field patches merge under a shared
 // lock so an idle worktab cannot overwrite newer settings or resurrect a key.
-export function createPreferencesStore({storage = globalThis.chrome?.storage?.local, locks = globalThis.navigator?.locks} = {}) {
+export function createPreferencesStore({storage = globalThis.chrome?.storage?.local, locks = globalThis.navigator?.locks, module = 'accounts'} = {}) {
   let writes = Promise.resolve(), protection;
+  const settingsField = module === 'youtube' ? 'youtubeSettings' : 'settings';
+  function view(value) {
+    if (!value) return null;
+    const {youtubeSettings, ...saved} = value;
+    return {...saved, settings: settingsField === 'youtubeSettings' ? youtubeSettings || {} : saved.settings};
+  }
   async function protect() {
     if (!storage) throw new Error('PREFERENCES_STORAGE_UNAVAILABLE');
     protection ||= Promise.resolve().then(() => storage.setAccessLevel?.({accessLevel: 'TRUSTED_CONTEXTS'}))
@@ -66,23 +79,24 @@ export function createPreferencesStore({storage = globalThis.chrome?.storage?.lo
   async function load() {
     await protect();
     await writes;
-    return normalize((await storage.get(PREFERENCES_KEY))[PREFERENCES_KEY]);
+    return view(normalize((await storage.get(PREFERENCES_KEY))[PREFERENCES_KEY]));
   }
   function update(patch = {}) {
     // Copy immediately; caller edits must not change an already queued write.
     const settings = sanitizeSettings(patch.settings);
+    if (module === 'youtube') delete settings.platformSelect;
     const remember = typeof patch.rememberYoutubeKey === 'boolean' ? patch.rememberYoutubeKey : undefined;
     const hasKey = Object.hasOwn(patch, 'youtubeKey'), key = cleanKey(patch.youtubeKey);
     const write = async () => {
       await protect();
       const current = normalize((await storage.get(PREFERENCES_KEY))[PREFERENCES_KEY]) ||
         {schemaVersion: 1, settings: {}, rememberYoutubeKey: true};
-      current.settings = sanitizeSettings({...current.settings, ...settings});
+      current[settingsField] = sanitizeSettings({...current[settingsField], ...settings});
       if (remember !== undefined) current.rememberYoutubeKey = remember;
       if (!current.rememberYoutubeKey || (hasKey && !key)) delete current.youtubeKey;
       else if (hasKey) current.youtubeKey = key;
       await storage.set({[PREFERENCES_KEY]: current});
-      return current;
+      return view(current);
     };
     const pending = writes.then(() => locks ? locks.request('social-metrics-preferences', write) : write());
     writes = pending.catch(() => {});

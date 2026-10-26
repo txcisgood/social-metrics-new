@@ -1,3 +1,6 @@
+import {parseYouTubeVideoURL} from './youtube-input.mjs';
+import {COMMENT_STATUS as COMMENT_LABELS} from './youtube-comments.mjs';
+import {formatVideoDuration} from './format.mjs';
 // SheetJS is bundled locally and loaded before this module by the extension page.
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_ROWS = 50000;
@@ -5,6 +8,10 @@ const MAX_COLUMNS = 512;
 const RESULT_HEADERS = [
   "行号", "账号名", "平台", "主页链接", "目标日期", "期间有无发布", "作品标题",
   "作品链接", "发布时间(本地)", "类型", "时长", "粉丝数", "播放", "点赞", "评论", "抓取时间", "备注",
+];
+const RESULT_WIDTHS = [6, 22, 11, 38, 28, 13, 46, 40, 19, 11, 9, 12, 11, 11, 11, 19, 45];
+const VIDEO_URL_HEADERS = [
+  "视频简介", "频道名称", "频道ID", "采集模式", "搜索关键词", "详情状态", "评论采集状态", "已采集评论条数",
 ];
 const PLATFORM_TEXT = { youtube: "YouTube", instagram: "Instagram", facebook: "Facebook" };
 const STATUS_TEXT = { OK: "有", NO_POST: "无", FAILED: "抓取失败" };
@@ -213,6 +220,47 @@ function literalCell(value) {
   return { t: "s", v: value == null ? "" : String(value) };
 }
 
+export function loadVideoAccounts(workbook, sheetName = workbook?.SheetNames?.[0]) {
+  const sheet = workbook?.Sheets?.[sheetName];
+  if (!sheet?.['!ref']) throw new Error('工作表是空的。');
+  const range = xlsx().utils.decode_range(sheet['!ref']);
+  if (range.e.r >= MAX_ROWS || range.e.c >= MAX_COLUMNS) throw new Error('工作表范围过大，请整理后重新导入。');
+  let first = range.s.r;
+  while (first <= range.e.r && !Array.from({length: range.e.c + 1}, (_, c) => cellUrl(sheet, first, c)).some(Boolean)) first++;
+  const headers = Array.from({length: range.e.c + 1}, (_, c) => normalizeHeader(cellText(sheet, first, c)));
+  const aliases = ['视频链接', '视频url', '作品链接', 'videourl', 'videolink', 'url', '链接', 'link'];
+  const urlColumn = aliases.map(alias => headers.indexOf(alias)).find(i => i >= 0);
+  const header = urlColumn !== undefined;
+  const column = header ? urlColumn : range.e.c === 0 ? 0 : 1;
+  const noteColumn = headers.findIndex(value => ['备注', 'note', 'notes'].includes(value));
+  const seen = new Set(), accounts = [], warnings = [];
+  for (let row = first + Number(header); row <= range.e.r; row++) {
+    const raw = cellUrl(sheet, row, column);
+    if (!raw) continue;
+    try {
+      const video = parseYouTubeVideoURL(raw);
+      if (seen.has(video.id)) { warnings.push(`第 ${row + 1} 行视频重复，已去重。`); continue; }
+      seen.add(video.id);
+      accounts.push({row_no: row + 1, name: video.id, url: video.url, platform: 'youtube', youtubeMode: 'videos',
+        note: noteColumn >= 0 ? cellText(sheet, row, noteColumn) : ''});
+    } catch (error) { warnings.push(`第 ${row + 1} 行：${error.message}`); }
+  }
+  return {accounts, warnings};
+}
+
+export function createVideoTemplate() {
+  const workbook = xlsx().utils.book_new();
+  xlsx().utils.book_append_sheet(workbook, makeSheet([['视频链接（必填）', '备注（选填）'], ['', '']], [72, 36]), '视频清单');
+  xlsx().utils.book_append_sheet(workbook, makeSheet([
+    ['填写说明', '内容'], ['填写位置', '在「视频清单」中每行填写一个视频链接，最多 100 条；支持普通视频、youtu.be、Shorts 和直播视频链接。'],
+    ['链接示例', '示例：https://www.youtube.com/watch?v=视频ID（请换成实际视频链接）'],
+    ['采集内容', '只读取指定视频；导出标题、独立简介、指标，以及 API 可访问的主评论和回复。'],
+    ['评论关系', '回复归属主评论；API 不保证提供多级回复之间的准确关系。'],
+    ['密钥', 'API Key 只填在插件工作台，不要写进表格。'],
+  ], [24, 100]), '填写说明');
+  return workbook;
+}
+
 function httpsLink(value) {
   try {
     const url = new URL(String(value));
@@ -279,7 +327,7 @@ export function createAccountsTemplate(platform = "instagram") {
     ["YouTube 密钥", "API Key 填在插件工作台中，不要填入账号表。"],
   );
   rows.push(
-    ["导入后", "选择「账号清单」工作表，检查识别数量和平台筛选。"],
+    ["导入后", "自动读取第一张工作表「账号清单」，检查识别数量和平台筛选。"],
     ["日期与时区", "在插件中选择采集日期和时区，不需要填在此表中。"],
     ["文件与账号上限", "每个文件不超过 10 MB，每轮最多采集 500 个账号。"],
     ["Facebook", "当前不支持采集；已有账号表中的 Facebook 行会提示跳过。"],
@@ -302,26 +350,67 @@ function failureSuggestion(error) {
 }
 
 export function createResultsWorkbook(results, meta = {}) {
+  return resultsWorkbook(results, meta, false);
+}
+
+// Only the independent video URL workflow opts into the extended report.
+// Additional fields on a result must never change the legacy export schema.
+export function createVideoResultsWorkbook(results, meta = {}) {
+  return resultsWorkbook(results, meta, true);
+}
+
+function resultsWorkbook(results, meta, videoUrl) {
   if (!Array.isArray(results)) throw new Error("采集结果格式无效。");
   const workbook = xlsx().utils.book_new();
-  const rows = [RESULT_HEADERS];
+  const rows = [videoUrl ? [...RESULT_HEADERS, ...VIDEO_URL_HEADERS] : RESULT_HEADERS];
   const failedRows = [["行号", "账号名", "平台", "主页链接", "失败原因", "建议"]];
   for (const result of results) {
     const extra = result.extra || {};
     const note = result.status === "FAILED" && result.error ? result.error : extra["备注"] || extra["提示"] || result.note || "";
-    rows.push([
+    const row = [
       result.row_no, result.account_name, PLATFORM_TEXT[result.platform] || result.platform,
-      result.profile_url, result.target_date, result.status === "FAILED" && result.error_code === "PAGE_INCOMPLETE"
+      result.profile_url, result.target_date, result.status === "FAILED" && ["PAGE_INCOMPLETE", "YT_INCOMPLETE", "YT_DETAIL_PENDING"].includes(result.error_code)
         ? "待核对" : STATUS_TEXT[result.status] || result.status,
-      result.post_title, result.post_url, result.published_local, result.post_type, extra["时长"],
+      result.post_title, result.post_url, result.published_local, result.post_type,
+      result.platform === 'youtube' ? formatVideoDuration(extra["时长"]) : extra["时长"],
       result.follower_count, result.view_count, result.like_count, result.comment_count, result.fetched_at, note,
-    ]);
+    ];
+    if (videoUrl) row.push(
+      result.post_description, result.channel_title, result.channel_id, result.source_mode, result.source_query,
+      result.detail_status, COMMENT_LABELS[result.comments_status] || '', result.comments?.length ?? '',
+    );
+    rows.push(row);
     if (result.status === "FAILED") {
       failedRows.push([result.row_no, result.account_name, PLATFORM_TEXT[result.platform] || result.platform,
         result.profile_url, result.error, result.error_action || failureSuggestion(result.error)]);
     }
+    if (videoUrl && ['PARTIAL', 'UNAVAILABLE', 'INTERRUPTED', 'RUNNING'].includes(result.comments_status)) {
+      failedRows.push([result.row_no, result.account_name, 'YouTube', result.post_url,
+        result.comments_error || '评论或回复尚未读取完整。', '已取得的视频和评论仍保留，请核对后补采。']);
+    }
   }
-  xlsx().utils.book_append_sheet(workbook, makeSheet(rows, [6, 22, 11, 38, 28, 13, 46, 40, 19, 11, 9, 12, 11, 11, 11, 19, 45], [3, 7]), "采集结果");
+  const widths = videoUrl ? [...RESULT_WIDTHS, 80, 28, 28, 14, 28, 14, 22, 16] : RESULT_WIDTHS;
+  xlsx().utils.book_append_sheet(workbook, makeSheet(rows, widths, [3, 7]), "采集结果");
+  if (videoUrl) {
+    const commentRows = [['视频链接', '视频标题', '用户名', '评论内容', '类型', '所属主评论', '发布时间', '点赞数', '评论ID', '主评论ID', '评论采集状态']];
+    for (const result of results) {
+      const comments = result.comments || [], byId = new Map(comments.map(c => [c.id, c]));
+      const ordered = [], replies = new Map();
+      for (const c of comments) if (c.parent_id) {
+        if (!replies.has(c.parent_id)) replies.set(c.parent_id, []);
+        replies.get(c.parent_id).push(c);
+      }
+      for (const root of comments.filter(c => !c.parent_id)) ordered.push(root, ...(replies.get(root.id) || []));
+      ordered.push(...comments.filter(c => c.parent_id && !byId.has(c.parent_id)));
+      for (const c of ordered) commentRows.push([result.post_url, result.post_title, c.author, c.text, c.type,
+        c.parent_id ? byId.get(c.parent_id)?.text || '所属主评论未读取' : '', c.published_at, c.like_count,
+        c.id, c.parent_id, COMMENT_LABELS[result.comments_status] || '']);
+    }
+    const sheet = makeSheet(commentRows, [42, 40, 24, 90, 12, 70, 24, 10, 28, 28, 24], [0]);
+    // Keep association IDs for analysis without crowding the default reading view.
+    sheet['!cols'][8].hidden = true; sheet['!cols'][9].hidden = true;
+    xlsx().utils.book_append_sheet(workbook, sheet, '评论详情');
+  }
   xlsx().utils.book_append_sheet(workbook, makeSheet(failedRows, [6, 22, 11, 38, 50, 42], [3]), "待人工核对");
   const metaRows = [["项目", "值"], ...Object.entries(meta)];
   xlsx().utils.book_append_sheet(workbook, makeSheet(metaRows, [26, 70]), "本次运行信息");
@@ -334,6 +423,7 @@ export function summarize(results) {
   for (const result of results) {
     const group = groups[result.status];
     if (group) group.add(JSON.stringify([result.platform, result.row_no]));
+    if (['PARTIAL', 'UNAVAILABLE', 'INTERRUPTED', 'RUNNING'].includes(result.comments_status)) groups.FAILED.add(JSON.stringify([result.platform, result.row_no]));
     if (result.status === "OK") posts++;
   }
   return { okAccounts: groups.OK.size, noPostAccounts: groups.NO_POST.size, failedAccounts: groups.FAILED.size, posts };

@@ -189,7 +189,8 @@ for (const [message, code, expectedMessage, expectedAction] of fileCases) {
 test('missing input account list is presented as a preparation step', () => {
   const result = describeError(new Error('请先导入账号文件，或点击“使用示例”；确认文件中包含所选平台'));
   assert.equal(result.code, 'NO_ACCOUNTS');
-  assert.match(result.action, /工作表和平台筛选/);
+  assert.match(result.action, /第一张工作表/);
+  assert.match(result.action, /平台筛选/);
 });
 
 test('dates, timezone and account-count validations provide fixed instructions', () => {

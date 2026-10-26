@@ -8,7 +8,7 @@ function field(error, name) {
 
 function importError(message) {
   if (/(?:文件|工作表).*(?:是空的|为空)|empty (?:file|sheet)/i.test(message)) {
-    return describe('EMPTY_FILE', '账号表没有内容', '所选文件或工作表为空。', '选择有账号数据的工作表，或下载模板填写后重新导入。');
+    return describe('EMPTY_FILE', '账号表没有内容', '所选文件或第一张工作表为空。', '在第一张工作表填写数据，或下载模板填写后重新导入。');
   }
   if (/(?:超过|不能超过)\s*10\s*MB|file too large/i.test(message)) {
     return describe('FILE_TOO_LARGE', '账号文件太大', '账号文件不能超过 10 MB。', '把账号表拆成较小的文件，再分批导入。');
@@ -29,10 +29,10 @@ function importError(message) {
     return describe('MISSING_HEADERS', '没有找到主页链接列', '插件未识别出账号主页链接所在的列。', '把该列表头改为“主页链接”，填写账号主页地址后重新导入。');
   }
   if (/没有.*账号|无.*账号|未.*账号|先导入账号|no accounts/i.test(message)) {
-    return describe('NO_ACCOUNTS', '没有可采集的账号', '所选文件或平台筛选中没有可用账号。', '确认表中有 Instagram 或 YouTube 主页链接，并检查工作表和平台筛选。');
+    return describe('NO_ACCOUNTS', '没有可采集的账号', '所选文件或平台筛选中没有可用账号。', '确认第一张工作表有 Instagram 或 YouTube 主页链接，并检查平台筛选。');
   }
   if (/找不到.*工作表|没有找到工作表|sheet.*not found/i.test(message)) {
-    return describe('INVALID_FILE', '无法读取所选工作表', '文件中没有找到可以读取的工作表。', '重新选择工作表；如果仍无法读取，请另存为 .xlsx 后重新导入。');
+    return describe('INVALID_FILE', '无法读取工作表', '文件中没有找到可以读取的工作表。', '确认第一张工作表有数据，另存为 .xlsx 后重新选择文件导入。');
   }
   if (/Excel 组件尚未加载/.test(message)) {
     return describe('COMPONENT_UNAVAILABLE', '表格组件尚未就绪', '插件暂时无法读取表格文件。', '重新打开插件工作台后再导入；仍失败时请重新加载扩展。');
@@ -92,6 +92,16 @@ export function describeError(error, {platform = '', stage = ''} = {}) {
     return describe('INTERRUPTED', '上次采集任务已中断', '上次任务因工作页关闭、刷新或其他中断而未完成，已恢复可用的结果。',
       '先导出已完成的结果，再重新导入账号表，手动采集尚未完成的账号。');
   }
+  const youtubeProblems = {
+    YT_INPUT: ['请检查 YouTube 采集设置', '输入内容或数量设置不符合当前采集模式。', '视频模式填写具体视频链接；频道模式每次填写一个频道主页；关键词不能为空。视频数量上限为 1–100，URL 每轮最多 100 条。'],
+    YT_INCOMPLETE: ['YouTube 结果尚未查全', '达到本轮视频/分页上限或分页异常，已取得的数据仍保留。', '先导出结果，再调整数量上限或日期范围。搜索返回结果不代表全网全部匹配视频。'],
+    YT_DETAIL_PENDING: ['视频详情未完成', '已发现视频链接，但详情尚未读取完整。', '先导出已有信息，再用视频 URL 模式补采该视频。'],
+    YT_VIDEO_UNAVAILABLE: ['视频详情不可用', '视频可能已删除、设为私密或无法通过 API 访问。', '在 YouTube 打开视频链接核对；其他视频仍可继续采集。'],
+    YT_COMMENTS_INCOMPLETE: ['评论完整性待核对', '评论或回复未读取完整，已取得的内容仍保留。', '导出评论详情并核对，稍后重新采集该视频。'],
+    YT_COMMENTS_UNAVAILABLE: ['评论暂不可访问', 'API 无法访问这条视频的评论或回复。', '视频数据仍保留，请在视频页面核对评论状态。'],
+    YT_COMMENTS_DISABLED: ['视频已关闭评论', '这条视频未开放评论。', '视频数据仍保留；无需反复重试评论。'],
+  };
+  if (Object.hasOwn(youtubeProblems, code)) return describe(code, ...youtubeProblems[code]);
   // Operation context precedes parser/native exception text, which is untrusted.
   if (['import', 'file-import', 'file'].includes(selectedStage)) return importError(message);
   if (['clipboard', 'copy'].includes(selectedStage)) return clipboardError();

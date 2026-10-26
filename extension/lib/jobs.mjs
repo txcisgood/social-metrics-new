@@ -90,7 +90,8 @@ export function failedRow(account, options, reason, {id = '', skipped = false} =
   const title = skipped ? '未采集（该平台已暂停）' : friendly.title;
   const action = skipped ? `前面的同平台账号触发了平台停止，本账号未发送采集请求。${friendly.action}` : friendly.action;
   return {row_no: account.row_no, account_name: account.name, platform: account.platform,
-    profile_url: account.url, target_date: dateRangeLabel(options.targetDates), status: 'FAILED', skipped,
+    profile_url: account.url, target_date: account.youtubeMode === 'videos' ? '指定视频（不限日期）'
+      : account.youtubeMode === 'channel' && options.youtubeRange === 'all' ? '全部公开视频' : dateRangeLabel(options.targetDates), status: 'FAILED', skipped,
     error: skipped ? `该平台本轮已停止。${title}：${action}` : `${title}：${friendly.message} ${action}`,
     error_title: title, error_action: action, error_code: friendly.code, error_id: id,
     fetched_at: new Date().toISOString(), extra: {备注: account.note || ''}};
@@ -128,7 +129,8 @@ export async function runAccounts(accounts, options, collectors, {signal, onAcco
       } catch (e) {
         const error = e instanceof Error ? e : new Error(String(e));
         const id = reportError(error, account);
-        const partial = Array.isArray(error.partialRows) ? error.partialRows.filter(row => row?.status === 'OK'
+        const partial = Array.isArray(error.partialRows) ? error.partialRows.filter(row => (row?.status === 'OK'
+          || (account.platform === 'youtube' && row?.status === 'FAILED' && ['YT_DETAIL_PENDING', 'YT_VIDEO_UNAVAILABLE'].includes(row.error_code)))
           && row.row_no === account.row_no && row.platform === account.platform && row.profile_url === account.url) : [];
         rows = [...partial, failedRow(account, options, error, {id})];
         if (['RATE_LIMIT', 'AUTH', 'TAB'].includes(error.code)) halted.set(account.platform, {error, id});

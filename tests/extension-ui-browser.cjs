@@ -488,6 +488,11 @@ const reviewRows = [
     }
     assert.equal(await page.locator('#exportXlsx').isDisabled(), true);
     assert.equal(await page.locator('#copyLogs').isEnabled(), true);
+    assert.equal(await page.locator('#troubleshooting').evaluate(element => element.open), false);
+    assert.equal(await page.locator('#copyLogs').isVisible(), false);
+    assert.equal(await page.locator('#logList').isVisible(), false);
+    assert.ok((await page.locator('#troubleshooting').boundingBox()).height <= 56,
+      'Collapsed troubleshooting must occupy a single compact row');
     assert.equal(await page.locator('#youtubeSection').evaluate(element => element.tagName), 'DETAILS');
     assert.equal(await page.locator('#diagnosticsDetails').evaluate(element => element.tagName), 'DETAILS');
     assert.match(await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme), /dark/);
@@ -518,6 +523,20 @@ const reviewRows = [
     assert.equal(buttonFocus.focusVisible, true);
     assert.notEqual(buttonFocus.outlineStyle, 'none');
     assert.ok(buttonFocus.outlineWidth >= 2, 'Keyboard focus must remain visually distinguishable');
+
+    // Troubleshooting is secondary, keyboard accessible, and reachable from
+    // navigation. Opening it does not change the primary collection controls.
+    await page.locator('.activity-summary').focus(); await page.keyboard.press('Space');
+    await page.locator('#copyLogs').waitFor({state: 'visible'});
+    assert.equal(await page.locator('#troubleshooting').evaluate(element => element.open), true);
+    assert.equal(await page.locator('#startButton').isEnabled(), true);
+    await screenshot('diagnostics-expanded');
+    await page.locator('.activity-summary').focus(); await page.keyboard.press('Enter');
+    assert.equal(await page.locator('#copyLogs').isVisible(), false);
+    await page.locator('a[href="#troubleshooting"]').click();
+    assert.equal(await page.locator('#troubleshooting').evaluate(element => element.open), true);
+    await page.locator('.activity-summary').click();
+    await page.evaluate(() => window.scrollTo(0, 0));
 
     // Scrolling long settings never hides the start/stop controls on desktop.
     await page.getByText('高级设置', {exact: true}).click();
@@ -585,6 +604,8 @@ const reviewRows = [
     await page.evaluate(() => window.__metricsReportError(Object.assign(new Error('Synthetic UI review fixture'),
       {code: 'PAGE_INCOMPLETE'}), 'collect'));
     assert.equal(await page.locator('#problemPanel').isVisible(), true);
+    assert.equal(await page.locator('#troubleshooting').evaluate(element => element.open), false,
+      'Important errors remain visible without expanding technical logs');
     assert.match(await page.locator('#problemAction').textContent(), /导出|核对/);
     assert.ok(!/Error:|at .*\.mjs/.test(await page.locator('#problemPanel').textContent()));
     await page.locator('.settings-scroll').evaluate(element => { element.scrollTop = 0; });
@@ -692,6 +713,35 @@ const reviewRows = [
     await assertMetrics(expectedReview);
     assert.equal(await page.locator('#workflowCollect').getAttribute('data-status'), 'review');
     assert.match(await page.locator('#progressBar').getAttribute('aria-valuetext'), /采集已停止/);
+
+    // Import status is part of the picker itself, with a recognizable file
+    // shape, full filename and count. Long names stay readable on mobile.
+    const upload = {name: '2026年十月份Instagram合作博主账号采集清单.csv', mimeType: 'text/csv',
+      buffer: Buffer.from('账号名,主页链接\n测试博主,https://www.instagram.com/example_creator/\n')};
+    await page.locator('#inputFile').setInputFiles(upload);
+    await page.waitForFunction(() => document.getElementById('filePicker').dataset.state === 'ready');
+    assert.equal(await page.locator('#filePickerTitle').textContent(), upload.name);
+    assert.match(await page.locator('#filePickerDescription').textContent(), /已导入 1 个账号/);
+    assert.equal(await page.locator('#selectedFileIcon').isVisible(), true);
+    assert.equal(await page.locator('#uploadFileIcon').isVisible(), false);
+    const retainedResult = await page.evaluate(async () => (await chrome.storage.session.get('lastRun')).lastRun);
+    for (const [theme, style] of [['dark', 'tech'], ['light', 'classic']]) {
+      await appearance(theme, style, theme);
+      for (const width of [1440, 390, 320]) {
+        await page.setViewportSize({width, height: 1000});
+        await page.locator('.settings-scroll').evaluate(element => { element.scrollTop = 0; });
+        await noHorizontalOverflow(`Uploaded file ${style} ${width}`);
+        await viewportScreenshot(`uploaded-file-${style}-${width}`, '#filePicker');
+      }
+    }
+    await page.locator('#inputFile').setInputFiles({name: 'empty.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.alloc(0)});
+    await page.waitForFunction(() => document.getElementById('filePicker').dataset.state === 'error');
+    assert.match(await page.locator('#filePickerDescription').textContent(), /读取失败/);
+    assert.equal(await page.locator('#filePickerTitle').textContent(), 'empty.xlsx');
+    assert.deepEqual(await page.evaluate(async () => (await chrome.storage.session.get('lastRun')).lastRun), retainedResult,
+      'A failed next input must retain the previous result');
+    await page.locator('#inputFile').setInputFiles(upload);
+    await page.waitForFunction(() => document.getElementById('filePicker').dataset.state === 'ready');
     assert.deepEqual(errors, []);
     assert.deepEqual(externalRequests, [], 'UI rendering and local fixtures must not contact any remote service');
     console.log(`PASS ${context.browser().version()}: themed selects, six persisted appearance combinations, animated help with mouse exit/keyboard/touch/reentry/reduced motion, decoded extension/action/header/favicon icons, 390/320px layout, preserved results, and zero collection/network requests. Previews: ${previewDirectory}`);
